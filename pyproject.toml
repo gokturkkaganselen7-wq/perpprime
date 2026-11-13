@@ -1,0 +1,19 @@
+[project]
+name = "cfos"
+version = "1.0.0"
+description = "PerpPrime — agent-native crypto perpetual futures desk, powered by the CFOS engine"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = []
+
+[project.optional-dependencies]
+live = ["ccxt>=4.4"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+cfos = "cfos.cli:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"

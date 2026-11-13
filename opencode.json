@@ -1,0 +1,23 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "skills": ["/home/gokturkkaganselen7/opencodetrading/cfos/skills"],
+  "mcp": {
+    "servers": {
+      "cfos": {
+        "type": "local",
+        "command": [
+          "/home/gokturkkaganselen7/opencodetrading/cfos/.venv/bin/python",
+          "-m",
+          "cfos",
+          "mcp"
+        ],
+        "cwd": "/home/gokturkkaganselen7/opencodetrading/cfos",
+        "environment": {
+          "PYTHONPATH": "/home/gokturkkaganselen7/opencodetrading/cfos/src",
+          "CFOS_HOME": "/home/gokturkkaganselen7/opencodetrading/cfos",
+          "CFOS_MODE": "paper"
+        }
+      }
+    }
+  }
+}

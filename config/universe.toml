@@ -1,0 +1,45 @@
+# CFOS universe and correlation clusters.
+# Symbols use CCXT unified swap notation: BASE/QUOTE:SETTLE
+# If a symbol is not in `allow`, the executor refuses it.
+
+[universe]
+allow = [
+  "BTC/USDT:USDT",
+  "ETH/USDT:USDT",
+  "SOL/USDT:USDT",
+  "BNB/USDT:USDT",
+  "XRP/USDT:USDT",
+  "DOGE/USDT:USDT",
+  "AVAX/USDT:USDT",
+  "LINK/USDT:USDT",
+  "ARB/USDT:USDT",
+  "OP/USDT:USDT",
+]
+# Minimum 24h quote volume in USD for a symbol to be tradable.
+min_quote_volume_usd = 50000000
+
+[clusters]
+# Correlation clusters. A position in BTC and one in ETH is effectively one
+# bet; max_cluster_positions in risk.toml enforces that.
+majors = ["BTC/USDT:USDT", "ETH/USDT:USDT"]
+large_cap = ["BNB/USDT:USDT", "SOL/USDT:USDT", "XRP/USDT:USDT", "DOGE/USDT:USDT"]
+defi = ["LINK/USDT:USDT", "AVAX/USDT:USDT"]
+l2 = ["ARB/USDT:USDT", "OP/USDT:USDT"]
+
+[venues]
+# default venue unless CFOS_VENUE overrides it
+default = "bybit"
+
+[venues.bybit]
+default_type = "swap"
+sandbox = true
+# Bybit one-way mode. Do not switch to hedge mode without changing execution.py.
+position_idx = 0
+
+[venues.binanceusdm]
+default_type = "swap"
+sandbox = true
+
+[venues.okx]
+default_type = "swap"
+sandbox = true

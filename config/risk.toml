@@ -1,0 +1,54 @@
+# CFOS risk policy — v1
+# Every number here is enforced by src/cfos/risk.py. Editing a limit is a
+# deliberate act: the router and the executor both read this file.
+
+[account]
+# Percent of equity risked between entry and stop for one trade.
+risk_per_trade_pct = 0.50
+# Hard stops. Breach => BLOCK for the rest of the day / week.
+daily_loss_limit_pct = 2.00
+weekly_loss_limit_pct = 5.00
+# Peak-to-trough equity drawdown that disables new risk entirely.
+max_drawdown_pct = 10.00
+
+[leverage]
+# Per-position and whole-account caps. 3x means a 33% adverse move is fatal;
+# the stop should always be hit long before that.
+max_leverage = 3.0
+max_portfolio_leverage = 3.0
+
+[positions]
+max_open_positions = 3
+max_per_symbol = 1
+# Sum of open initial risk. 3% heat with 0.5% per trade = 6 positions max,
+# but max_open_positions is the binding constraint.
+max_portfolio_heat_pct = 3.0
+# Max simultaneous positions sharing a correlation cluster (see universe.toml).
+max_cluster_positions = 2
+max_trades_per_day = 6
+
+[discipline]
+# After N consecutive losses, wait cooldown_minutes before the next entry.
+consecutive_loss_cooldown = 2
+cooldown_minutes = 60
+# Reject setups whose reward:risk is below this.
+min_rr = 2.0
+
+[execution]
+# Taker fee assumption for paper fills, percent.
+taker_fee_pct = 0.055
+# Paper slippage applied to market fills, basis points.
+paper_slippage_bps = 2.0
+# Reject entries when the book spread is wider than this.
+max_spread_bps = 8.0
+# Refuse to act on a price/funding snapshot older than this.
+max_data_age_sec = 120
+# Limit entries post-only when the venue supports it.
+post_only_entries = false
+# Retry count for transient venue errors (network/timeouts only).
+max_order_retries = 2
+
+[maintenance]
+# Used for the liquidation-distance estimate. Venue-specific MMR is tiered;
+# 0.5% is a conservative placeholder for BTC/ETH at low leverage.
+maintenance_margin_rate = 0.005

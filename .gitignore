@@ -1,0 +1,25 @@
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Runtime state
+data/
+*.sqlite3
+*.sqlite3-journal
+*.jsonl
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
