@@ -202,6 +202,27 @@ emir göndermez.
 
 ---
 
+## Backtest
+
+`scripts/backtest_trend.py` trend kurallarını gerçek Bybit perpetual verisinde
+test eder: funding maliyeti, 5.5 bps taker + 2 bps kayma, look-ahead yok
+(sinyal kapanışta, fill sonraki bar açılışında), walk-forward ve ablasyon.
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/backtest_trend.py --mode single \
+  --symbols BTC/USDT:USDT ETH/USDT:USDT SOL/USDT:USDT --timeframes 1h \
+  --start 2025-11-14 --end 2026-11-14 --warmup-days 75
+
+PYTHONPATH=src .venv/bin/python scripts/backtest_trend.py --mode walkforward \
+  --symbols BTC/USDT:USDT --start 2025-11-01 --end 2026-11-14 \
+  --train-days 90 --test-days 30 --step-days 30
+```
+
+Sonuçlar, karşılaştırmalar ve ölçülmeyen riskler:
+**[docs/BACKTEST.md](docs/BACKTEST.md)**.
+
+---
+
 ## Depo düzeni
 
 ```
@@ -210,10 +231,11 @@ cfos/
 ├── opencode.json, .mcp.json      # MCP bağlantıları
 ├── bin/cfos                      # başlatıcı (PYTHONPATH ayarlı)
 ├── config/                       # risk.toml, universe.toml
+├── scripts/                      # backtest_trend.py (funding + walk-forward)
 ├── skills/                       # 24 SKILL.md + registry audit
 ├── src/cfos/                     # Python çekirdeği
 ├── tests/                        # pytest
-├── docs/                         # SAFETY, LIVE_CHECKLIST, ARCHITECTURE
+├── docs/                         # SAFETY, LIVE_CHECKLIST, ARCHITECTURE, BACKTEST
 └── data/                         # SQLite + paper state (git dışı)
 ```
 
@@ -221,8 +243,9 @@ cfos/
 
 ## v1 sınırları (dürüst liste)
 
-- Backtest motoru **yok**; `cfos-backtest`/`cfos-walk-forward` ancak
-  yeniden üretilebilir bir script ile sayı üretir.
+- Yerleşik `cfos backtest` komutu **yok**; sayı üretmek için
+  `scripts/backtest_trend.py` kullanılır. `cfos-backtest`/`cfos-walk-forward`
+  skill'leri bu script olmadan sonuç uydurmaz.
 - Execution tek sembol ve tek yön (one-way mode) varsayar; hedge mode yok.
 - Funding/OI **tarihsel serisi** yok; yalnızca anlık snapshot.
 - Grid otomasyonu yok; grid planı seviye seviye manuel/agent emri gerektirir.
