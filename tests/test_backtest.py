@@ -17,6 +17,7 @@ from backtest_trend import (  # noqa: E402
     SLIP_BPS,
     Params,
     liquidation_price,
+    portfolio_metrics,
     simulate,
 )
 
@@ -212,3 +213,44 @@ def test_same_bar_tp1_and_breakeven_is_counted():
     assert trade["exit_reason"] == "breakeven"
     assert trade["partials"] == 2
     assert res["same_bar_tp1_be"] == 1
+
+
+def test_portfolio_metrics_combines_legs_at_the_bar_level():
+    """Portfolio DD must sum concurrent marks, not add up per-symbol DDs."""
+    legs = [
+        {"symbol": "A", "trades": 2, "curve": [
+            [0, 10_000, 10_000],
+            [1, 9_800, 9_700],
+            [2, 10_100, 10_100],
+        ]},
+        {"symbol": "B", "trades": 1, "curve": [
+            [0, 10_000, 10_000],
+            [1, 10_100, 10_100],
+            [2, 9_900, 9_900],
+        ]},
+    ]
+
+    port = portfolio_metrics(legs, equity0=10_000.0)
+
+    assert port["legs"] == ["A", "B"]
+    assert port["start_equity"] == 20_000.0
+    assert port["end_equity"] == 20_000.0
+    assert port["return_pct"] == 0.0
+    # Close marks: 20,000 -> 19,900 -> 20,000 = 0.5% drawdown.
+    assert port["max_dd_close_pct"] == pytest.approx(0.5)
+    # Worst marks assume both legs hit their low in the same bar: 1.0%.
+    assert port["max_dd_worst_pct"] == pytest.approx(1.0)
+    assert port["trades"] == 3
+
+
+def test_portfolio_metrics_ignores_unshared_timestamps():
+    legs = [
+        {"symbol": "A", "trades": 1, "curve": [[0, 10_000, 10_000], [1, 9_000, 9_000]]},
+        {"symbol": "B", "trades": 1, "curve": [[1, 10_000, 10_000], [2, 11_000, 11_000]]},
+    ]
+
+    port = portfolio_metrics(legs, equity0=10_000.0)
+
+    assert port["bars"] == 1
+    assert port["start_equity"] == 20_000.0
+    assert port["end_equity"] == 19_000.0

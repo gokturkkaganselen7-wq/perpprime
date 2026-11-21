@@ -309,6 +309,7 @@ def simulate(prep: dict[str, Any], params: Params,
     max_dd = 0.0
     same_bar_tp1_be = 0
     ruined = False
+    curve: list[list[float]] = []
 
     def unrealized(side: str, entry: float, price: float, qty: float) -> float:
         return (price - entry) * qty if side == "long" else (entry - price) * qty
@@ -466,8 +467,10 @@ def simulate(prep: dict[str, Any], params: Params,
                 peak_equity = max(peak_equity, close_mark)
                 if peak_equity > 0:
                     max_dd = max(max_dd, (peak_equity - worst) / peak_equity * 100.0)
+                curve.append([int(ts), round(close_mark, 2), round(worst, 2)])
             else:
                 peak_equity = max(peak_equity, equity)
+                curve.append([int(ts), round(equity, 2), round(equity, 2)])
 
         # ---- new signal ---------------------------------------------------- #
         if ruined or pos is not None or ts < start_ms or ts >= end_ms:
@@ -538,12 +541,63 @@ def simulate(prep: dict[str, Any], params: Params,
     peak_equity = max(peak_equity, equity)
 
     return _metrics(trades, equity0, equity, max_dd=max_dd,
-                    same_bar_tp1_be=same_bar_tp1_be, ruined=ruined)
+                    same_bar_tp1_be=same_bar_tp1_be, ruined=ruined,
+                    curve=curve)
+
+
+def portfolio_metrics(results: list[dict[str, Any]],
+                      equity0: float = 10_000.0) -> dict[str, Any]:
+    """Combine per-symbol bar curves into one account-level curve.
+
+    Each leg starts at ``equity0``, so summing the legs is the portfolio
+    equity. ``max_dd_worst_pct`` sums every leg's worst intrabar mark, which
+    assumes all symbols hit their adverse extreme in the same bar: a stress
+    figure, not a forecast.
+    """
+    legs = {
+        r["symbol"]: {int(ts): (c, w) for ts, c, w in r.get("curve") or []}
+        for r in results
+    }
+    legs = {s: c for s, c in legs.items() if c}
+    if len(legs) < 2:
+        return {}
+    common = set.intersection(*(set(c) for c in legs.values()))
+    if not common:
+        return {}
+
+    close: list[float] = []
+    worst: list[float] = []
+    for ts in sorted(common):
+        close.append(sum(curves[ts][0] for curves in legs.values()))
+        worst.append(sum(curves[ts][1] for curves in legs.values()))
+
+    def drawdown(series: list[float]) -> float:
+        peak = series[0]
+        out = 0.0
+        for value in series:
+            peak = max(peak, value)
+            if peak > 0:
+                out = max(out, (peak - value) / peak * 100.0)
+        return out
+
+    start = equity0 * len(legs)
+    end = close[-1]
+    return {
+        "legs": sorted(legs),
+        "bars": len(common),
+        "start_equity": round(start, 2),
+        "end_equity": round(end, 2),
+        "return_pct": round((end - start) / start * 100.0, 3),
+        "max_dd_close_pct": round(drawdown(close), 2),
+        "max_dd_worst_pct": round(drawdown(worst), 2),
+        "trades": sum(r["trades"] for r in results if r["symbol"] in legs),
+    }
 
 
 def _metrics(trades: list[dict[str, Any]], equity0: float,
              equity: float, *, max_dd: float | None = None,
-             same_bar_tp1_be: int = 0, ruined: bool = False) -> dict[str, Any]:
+             same_bar_tp1_be: int = 0, ruined: bool = False,
+             curve: list[list[float]] | None = None) -> dict[str, Any]:
     n = len(trades)
     wins = [t for t in trades if t["pnl"] > 0]
     losses = [t for t in trades if t["pnl"] <= 0]
@@ -571,6 +625,7 @@ def _metrics(trades: list[dict[str, Any]], equity0: float,
         "max_drawdown_closed_pct": round(closed_dd, 2),
         "same_bar_tp1_be": same_bar_tp1_be,
         "ruined": ruined,
+        "curve": curve or [],
         "total_return_pct": round((equity - equity0) / equity0 * 100, 3),
         "final_equity": round(equity, 2),
         "fees_paid": round(sum(t["fees"] for t in trades), 2),
@@ -757,6 +812,12 @@ def main() -> int:
                       f"oos_avg={agg['oos']['avg_return_pct']}% "
                       f"base_avg={agg['baseline']['avg_return_pct']}% "
                       f"({time.time()-t:.0f}s)", file=sys.stderr)
+
+    if args.mode == "single" and len(payload["results"]) > 1:
+        if len({r["timeframe"] for r in payload["results"]}) == 1:
+            port = portfolio_metrics(payload["results"])
+            if port:
+                payload["portfolio"] = port
 
     if args.json_out:
         Path(args.json_out).write_text(json.dumps(payload, indent=2))
