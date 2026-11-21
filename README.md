@@ -207,8 +207,8 @@ emir göndermez.
 > **Düzeltme (2026-11-22).** v1.0.0 backtest'i girişleri **sinyal barının
 > açılışından** dolduruyordu — bir bar look-ahead. Hata düzeltildi, tüm
 > sonuçlar sıfırdan üretildi. **Düzeltilmiş sonuçlar trend kurallarının edge
-> göstermediğini söylüyor: 15 hücrenin 12'si negatif, PF 0.38–1.00, 12 aylık
-> DD %7.5–15.9.** Eski sayılar geri çekildi.
+> göstermediğini söylüyor: 15 hücrenin 12'si negatif, PF 0.39–1.00, 12 aylık
+> DD %7.7–16.9.** Eski sayılar geri çekildi.
 
 `scripts/backtest_trend.py` trend kurallarını gerçek Bybit perpetual verisinde
 test eder: funding maliyeti, 5.5 bps taker + 2 bps kayma, look-ahead yok
