@@ -237,19 +237,22 @@ TP1 and the breakeven stop, so that count is the assumption's blast radius.
 
 ## 8. Portfolio view (corrected)
 
-Three symbols on a 30,000 USDT account (each leg keeps its own 10k sizing,
-PnL summed by exit time).
+Three symbols on a 30,000 USDT account (each leg keeps its own 10k sizing).
+The combined curve sums the three bar-level equity paths.
 
-| Period | Ending equity | Return | Combined max DD | Trades |
-|---|---:|---:|---:|---:|
-| 1 month | 30,816 | +2.7% | 0.58% | 32 |
-| 12 months | 28,385 | -5.4% | 10.42% | 353 |
-| Bull 2023 | 27,010 | -10.0% | 11.30% | 319 |
-| Bull 2024 | 27,444 | -8.5% | 11.67% | 323 |
-| Correction 2024 | 27,400 | -8.7% | 8.67% | 158 |
+| Period | Ending equity | Return | Max DD (intrabar) | Max DD (close) | Trades |
+|---|---:|---:|---:|---:|---:|
+| 1 month | 30,816 | +2.7% | 0.98% | 1.00% | 32 |
+| 12 months | 28,385 | -5.4% | 10.93% | 10.87% | 353 |
+| Bull 2023 | 27,010 | -10.0% | 11.75% | 11.69% | 319 |
+| Bull 2024 | 27,444 | -8.5% | 11.81% | 11.74% | 323 |
+| Correction 2024 | 27,400 | -8.7% | 8.67% | 8.67% | 158 |
 
-The combined DD is measured on realised trade PnL, so it is slightly
-gentler than the per-symbol intrabar figures above.
+The intrabar column marks each leg at its worst adverse price with the
+live stop as a floor and assumes the three extremes coincide: a stress
+figure, not a forecast. The close column is the realised path. Both are
+worse than adding up per-symbol drawdowns, which would ignore that losses
+can arrive together.
 
 ## 9. What this backtest still does not model
 

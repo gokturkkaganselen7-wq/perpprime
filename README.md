@@ -229,7 +229,20 @@ Sonuçlar, karşılaştırmalar ve ölçülmeyen riskler:
 **[docs/BACKTEST.md](docs/BACKTEST.md)**. Denetim ve düzeltmeler:
 **[docs/AUDIT_2026-11-22.md](docs/AUDIT_2026-11-22.md)**.
 
----
+### Alternatif edge testleri
+
+Trend kuralları düzeltmeden sonra para kaybedince üç farklı hipotez aynı
+kurallarla test edildi: funding carry, opening-range breakout ve range
+mean-reversion. Üçü de maliyet sonrası negatif; hiçbiri
+`docs/STRATEGY_CHARTER.md` kanıt barajını geçmedi.
+
+- **[docs/EDGES_2026-11-22.md](docs/EDGES_2026-11-22.md)** — kurallar, 12 aylık
+  sonuçlar, 2023/2024 dayanıklılık pencereleri, walk-forward ve 2x maliyet
+  stresi.
+- **[docs/SKILL_PERFORMANCE.md](docs/SKILL_PERFORMANCE.md)** — 24 skill'in
+  hangisi ölçülebilir, hangisi altyapı/analiz; ölçülen dördü de `NO EDGE`.
+- **[docs/STRATEGY_CHARTER.md](docs/STRATEGY_CHARTER.md)** — piyasa, ufuk,
+  risk bütçesi, kanıt standardı ve emeklilik kriterleri.
 
 ## Depo düzeni
 
@@ -239,11 +252,11 @@ cfos/
 ├── opencode.json, .mcp.json      # MCP bağlantıları
 ├── bin/cfos                      # başlatıcı (PYTHONPATH ayarlı)
 ├── config/                       # risk.toml, universe.toml
-├── scripts/                      # backtest_trend.py (funding + walk-forward)
+├── scripts/                      # backtest_trend.py, backtest_edges.py
 ├── skills/                       # 24 SKILL.md + registry audit
 ├── src/cfos/                     # Python çekirdeği
 ├── tests/                        # pytest
-├── docs/                         # SAFETY, LIVE_CHECKLIST, ARCHITECTURE, BACKTEST, AUDIT
+├── docs/                         # SAFETY, LIVE_CHECKLIST, ARCHITECTURE, BACKTEST, AUDIT, EDGES, SKILL_PERFORMANCE, STRATEGY_CHARTER
 └── data/                         # SQLite + paper state (git dışı)
 ```
 
@@ -253,8 +266,10 @@ cfos/
 
 - **Canlı işlem için onay yok.** 2026-11-22 denetiminde backtest'teki
   look-ahead hatası düzeltildi; düzeltilmiş sonuçlar trend kurallarında
-  pozitif beklenti göstermiyor. Strateji yeniden tasarlanmadan gerçek
-  sermaye kullanılmamalı.
+  pozitif beklenti göstermiyor. Dört mekanik hipotez (trend, funding carry,
+  opening-range breakout, range fade) test edildi; hiçbiri
+  `docs/STRATEGY_CHARTER.md` kanıt barajını geçmedi. Strateji yeniden
+  tasarlanmadan gerçek sermaye kullanılmamalı.
 - Yerleşik `cfos backtest` komutu **yok**; sayı üretmek için
   `scripts/backtest_trend.py` kullanılır. `cfos-backtest`/`cfos-walk-forward`
   skill'leri bu script olmadan sonuç uydurmaz.
