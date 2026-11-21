@@ -79,6 +79,60 @@ def confirm_entry(
     return last
 
 
+_PROTECTIVE_ACTIVE = {
+    "open",
+    "new",
+    "untriggered",
+    "triggered",
+    "active",
+    "partially_filled",
+}
+_PROTECTIVE_DEAD = {
+    "canceled",
+    "cancelled",
+    "rejected",
+    "expired",
+    "failed",
+    "deactivated",
+}
+
+
+def confirm_protective_order(
+    exchange: BaseExchange,
+    symbol: str,
+    order: Any,
+    *,
+    attempts: int = 3,
+    delay: float = 0.3,
+) -> tuple[Any, bool]:
+    """Return ``(order, active)`` after the venue acknowledges a bracket leg.
+
+    A create response is not proof. A venue can return an order id with a
+    rejected or cancelled status, and a conditional order is only protecting
+    the position once it is actually live. The caller must treat ``active ==
+    False`` as an unprotected position and close it.
+    """
+    if isinstance(exchange, PaperExchange):
+        status = (order.status or "").lower()
+        return order, status in _PROTECTIVE_ACTIVE or status == ""
+
+    last = order
+    for _ in range(max(1, attempts)):
+        status = (last.status or "").lower()
+        if status in _PROTECTIVE_ACTIVE:
+            return last, True
+        if status in _PROTECTIVE_DEAD:
+            return last, False
+        if not last.id:
+            return last, False
+        time.sleep(delay)
+        try:
+            last = exchange.order(last.id, symbol)
+        except Exception:  # noqa: BLE001 - an unreadable order is not proof
+            return last, False
+    return last, (last.status or "").lower() in _PROTECTIVE_ACTIVE
+
+
 def defensive_close(
     settings: Settings, exchange: BaseExchange, symbol: str
 ) -> str:
@@ -461,6 +515,11 @@ def execute(
             client_id=f"{plan.id}-stop",
         )
         stop = exchange.create_order(stop_request)
+        stop, stop_active = confirm_protective_order(exchange, plan.symbol, stop)
+        if not stop_active:
+            raise RuntimeError(
+                f"stop order is not active on the venue (status={stop.status!r})"
+            )
         journal.log_order(
             client_id=f"{plan.id}-stop",
             venue=settings.venue.name,
@@ -492,6 +551,14 @@ def execute(
                 client_id=f"{plan.id}-tp{index}",
             )
             take_profit = exchange.create_order(tp_request)
+            take_profit, tp_active = confirm_protective_order(
+                exchange, plan.symbol, take_profit
+            )
+            if not tp_active:
+                raise RuntimeError(
+                    f"take-profit {index} is not active on the venue "
+                    f"(status={take_profit.status!r})"
+                )
             journal.log_order(
                 client_id=f"{plan.id}-tp{index}",
                 venue=settings.venue.name,

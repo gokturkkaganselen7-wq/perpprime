@@ -33,9 +33,15 @@ class FakeVenue(BaseExchange):
         entry_result: OrderResult | Exception | None = None,
         *,
         visible_after_entry: list[PositionSnapshot] | None = None,
+        stop_status: str = "open",
+        tp_status: str = "open",
+        poll_status: str = "open",
     ):
         self.entry_result = entry_result
         self.visible_after_entry = list(visible_after_entry or [])
+        self.stop_status = stop_status
+        self.tp_status = tp_status
+        self.poll_status = poll_status
         self._positions: list[PositionSnapshot] = []
         self.requests = []
         self.closed: list[float | None] = []
@@ -73,10 +79,15 @@ class FakeVenue(BaseExchange):
             if isinstance(self.entry_result, Exception):
                 raise self.entry_result
             return self.entry_result
+        status = "open"
+        if request.type == "stop_market":
+            status = self.stop_status
+        elif request.type == "take_profit_market":
+            status = self.tp_status
         return OrderResult(
             id=f"o{len(self.requests)}",
             client_id=request.client_id,
-            status="open",
+            status=status,
             filled=0.0,
             avg_price=request.price,
         )
@@ -86,7 +97,7 @@ class FakeVenue(BaseExchange):
         return OrderResult(
             id=order_id,
             client_id=None,
-            status="open",
+            status=self.poll_status,
             filled=0.0,
             avg_price=None,
         )
@@ -525,6 +536,71 @@ def test_partial_entry_cancels_residual_and_uses_venue_size(settings, monkeypatc
     entry, stop, *tps = fake.requests
     assert stop.amount == pytest.approx(0.02)
     assert sum(tp.amount for tp in tps) == pytest.approx(0.02)
+
+
+def _filled_entry(**kwargs):
+    return FakeVenue(
+        OrderResult(
+            id="e1",
+            client_id=None,
+            status="closed",
+            filled=0.05,
+            avg_price=65_000.0,
+        ),
+        visible_after_entry=[venue_position(0.05)],
+        **kwargs,
+    )
+
+
+def test_rejected_stop_triggers_emergency_close(settings, monkeypatch):
+    """A stop returned with a dead status must not count as protection."""
+    fake = _filled_entry(stop_status="rejected")
+    monkeypatch.setattr("cfos.execution.build_exchange", lambda _settings: fake)
+
+    report = execute(settings, make_plan(settings))
+
+    assert report.verdict is Verdict.ERROR
+    assert any("stop order is not active" in m for m in report.messages)
+    assert any("emergency close" in m.lower() for m in report.messages)
+    assert fake.closed == [None]
+    assert Journal(settings.db_path).open_positions() == []
+    # No take-profit may be attached behind a dead stop.
+    assert [r.type for r in fake.requests] == ["market", "stop_market"]
+
+
+def test_stop_cancelled_after_poll_triggers_emergency_close(settings, monkeypatch):
+    """An unknown create status is re-read; a cancelled result is a failure."""
+    fake = _filled_entry(stop_status="pending", poll_status="canceled")
+    monkeypatch.setattr("cfos.execution.build_exchange", lambda _settings: fake)
+    monkeypatch.setattr("cfos.execution.time.sleep", lambda _seconds: None)
+
+    report = execute(settings, make_plan(settings))
+
+    assert report.verdict is Verdict.ERROR
+    assert fake.polls == 1
+    assert any("stop order is not active" in m for m in report.messages)
+    assert any("canceled" in m for m in report.messages)
+    assert fake.closed == [None]
+    assert Journal(settings.db_path).open_positions() == []
+
+
+def test_rejected_take_profit_triggers_emergency_close(settings, monkeypatch):
+    """A live stop is not enough: a dead TP also leaves the plan incomplete."""
+    fake = _filled_entry(tp_status="rejected")
+    monkeypatch.setattr("cfos.execution.build_exchange", lambda _settings: fake)
+
+    report = execute(settings, make_plan(settings))
+
+    assert report.verdict is Verdict.ERROR
+    assert any("take-profit 1 is not active" in m for m in report.messages)
+    assert any("emergency close" in m.lower() for m in report.messages)
+    assert fake.closed == [None]
+    assert Journal(settings.db_path).open_positions() == []
+    assert [r.type for r in fake.requests] == [
+        "market",
+        "stop_market",
+        "take_profit_market",
+    ]
 
 
 def test_unconfirmed_entry_closes_a_visible_venue_position(settings, monkeypatch):
