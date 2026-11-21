@@ -44,6 +44,11 @@ from cfos.analysis import atr, compute_regime  # noqa: E402
 
 FEE_BPS = 5.5
 SLIP_BPS = 2.0
+# Maintenance margin used for the liquidation model. Bybit's tier-1 MMR is
+# around 0.5% for BTC/ETH perps; using one value for all three symbols is a
+# documented approximation, not a venue-exact schedule.
+MMR = 0.005
+LIQ_FEE_BPS = 55.0
 FOUR_H = 4 * 60 * 60 * 1000
 DAY = 86_400_000
 CACHE = Path("/tmp/cfos-backtest-cache")
@@ -261,12 +266,29 @@ class Position:
     funding: float = 0.0
     realized: float = 0.0
     exits: list[dict[str, Any]] = field(default_factory=list)
+    leverage: float = 0.0
+    liq_price: float | None = None
 
 
 def slip(price: float, side: str, entering: bool) -> float:
     buying = (side == "long") == entering
     f = 1.0 + SLIP_BPS / 10_000 if buying else 1.0 - SLIP_BPS / 10_000
     return price * f
+
+
+def liquidation_price(side: str, entry: float, leverage: float,
+                      mmr: float = MMR) -> float | None:
+    """Approximate isolated-margin liquidation price.
+
+    With effective leverage at or below 1x the position cannot be liquidated
+    by price alone, so the function returns ``None``. Above 1x the standard
+    maintenance-margin formula is used.
+    """
+    if leverage <= 1.0:
+        return None
+    if side == "long":
+        return entry * (1 - 1 / leverage + mmr)
+    return entry * (1 + 1 / leverage - mmr)
 
 
 def simulate(prep: dict[str, Any], params: Params,
@@ -283,19 +305,32 @@ def simulate(prep: dict[str, Any], params: Params,
     trades: list[dict[str, Any]] = []
     pos: Position | None = None
     pending_exit: str | None = None
+    peak_equity = equity0
+    max_dd = 0.0
+    same_bar_tp1_be = 0
+    ruined = False
 
-    def close_position(px: float, ts: int, qty: float, reason: str) -> None:
-        nonlocal equity, pos
+    def unrealized(side: str, entry: float, price: float, qty: float) -> float:
+        return (price - entry) * qty if side == "long" else (entry - price) * qty
+
+    def close_position(px: float, ts: int, qty: float, reason: str,
+                       extra_fee_bps: float = 0.0) -> None:
+        nonlocal equity, pos, pending_exit, ruined
         assert pos is not None
         fill = slip(px, pos.side, entering=False)
         gross = (fill - pos.entry) * qty if pos.side == "long" else (pos.entry - fill) * qty
-        fee = fill * qty * FEE_BPS / 10_000
+        fee = fill * qty * (FEE_BPS + extra_fee_bps) / 10_000
         pos.realized += gross - fee
         pos.fees += fee
         pos.exits.append({"ts": ts, "price": round(fill, 4), "qty": round(qty, 6),
                           "reason": reason})
         if qty >= pos.qty - 1e-12:
             equity += pos.realized
+            if equity <= 0:
+                # A leveraged gap can lose more than the account holds. Stop
+                # at zero: no venue lets you keep trading a wiped account.
+                equity = 0.0
+                ruined = True
             trades.append({
                 "side": pos.side,
                 "entry_ts": iso(pos.entry_ts), "exit_ts": iso(ts),
@@ -309,11 +344,23 @@ def simulate(prep: dict[str, Any], params: Params,
                 "bars_held": int((ts - pos.entry_ts) / step),
             })
             pos = None
+            pending_exit = None
 
     for i in range(1, len(rows)):
+        if ruined:
+            break
         ts, o, h, l, c, _v = rows[i]
+        equity_at_start = equity
+        had_pos = pos is not None and ts > start_ms
+        side_start = ""
+        entry_start = stop_start = qty_start = realized_start = 0.0
 
-        if pos is not None and ts > start_ms:
+        if had_pos:
+            assert pos is not None
+            side_start = pos.side
+            entry_start = pos.entry
+            stop_start = pos.stop
+
             # funding on every 8h stamp inside this bar
             rate = fbb[i]
             if rate:
@@ -321,58 +368,109 @@ def simulate(prep: dict[str, Any], params: Params,
                 pay = sign * pos.qty * c * rate
                 pos.realized -= pay
                 pos.funding -= pay
+            qty_start = pos.qty
+            realized_start = pos.realized
 
-            if pending_exit:
-                close_position(o, ts, pos.qty, pending_exit)
-                pending_exit = None
-                if pos is None:
-                    continue
+            # A gap through the liquidation level is the one case where a
+            # working stop cannot save the position: the venue liquidates at
+            # the open before any stop can fill at its own price.
+            liq_hit = False
+            if pos.liq_price is not None:
+                liq_hit = (o <= pos.liq_price) if pos.side == "long" \
+                    else (o >= pos.liq_price)
+            if liq_hit:
+                close_position(o, ts, pos.qty, "liquidation", LIQ_FEE_BPS)
+            else:
+                if pending_exit:
+                    close_position(o, ts, pos.qty, pending_exit)
+                    pending_exit = None
 
-            if pos is not None:
-                stop_hit = (l <= pos.stop) if pos.side == "long" else (h >= pos.stop)
-                if stop_hit:
-                    close_position(pos.stop, ts, pos.qty, "stop")
-                    continue
+                if pos is not None:
+                    stop_hit = (l <= pos.stop) if pos.side == "long" else (h >= pos.stop)
+                    if stop_hit:
+                        # A bar that opens through the stop fills at the open,
+                        # not at the stop: gap risk is real and always adverse.
+                        if pos.side == "long":
+                            fill_px, gapped = min(o, pos.stop), o < pos.stop
+                        else:
+                            fill_px, gapped = max(o, pos.stop), o > pos.stop
+                        close_position(fill_px, ts, pos.qty,
+                                       "stop_gap" if gapped else "stop")
+                    elif not pos.tp1_done:
+                        tp1_hit = (h >= pos.tp1) if pos.side == "long" \
+                            else (l <= pos.tp1)
+                        if tp1_hit:
+                            half = pos.qty / 2.0
+                            close_position(pos.tp1, ts, half, "tp1")
+                            if pos is not None:
+                                pos.qty -= half
+                                pos.tp1_done = True
+                                pos.stop = pos.entry
+                                be_hit = (l <= pos.stop) if pos.side == "long" \
+                                    else (h >= pos.stop)
+                                if be_hit:
+                                    # OHLC cannot prove whether the low came
+                                    # before or after TP1. Keep the stop-first
+                                    # convention (close the rest at breakeven)
+                                    # and count the bar so the assumption is
+                                    # visible in the report.
+                                    same_bar_tp1_be += 1
+                                    close_position(pos.stop, ts, pos.qty,
+                                                   "breakeven")
+                    else:
+                        tp2_hit = (h >= pos.tp2) if pos.side == "long" \
+                            else (l <= pos.tp2)
+                        if tp2_hit:
+                            close_position(pos.tp2, ts, pos.qty, "tp2")
 
-                if not pos.tp1_done:
-                    tp1_hit = (h >= pos.tp1) if pos.side == "long" else (l <= pos.tp1)
-                    if tp1_hit:
-                        half = pos.qty / 2.0
-                        close_position(pos.tp1, ts, half, "tp1")
-                        if pos is not None:
-                            pos.qty -= half
-                            pos.tp1_done = True
-                            pos.stop = pos.entry
-                            be_hit = (l <= pos.stop) if pos.side == "long" else (h >= pos.stop)
-                            if be_hit:
-                                close_position(pos.stop, ts, pos.qty, "breakeven")
-                                continue
+                    if pos is not None:
+                        idx = (((int(ts) // FOUR_H) * FOUR_H - FOUR_H)
+                               - h4_start) // FOUR_H
+                        reg = regime_at[idx] if 0 <= idx < len(regime_at) else {
+                            "regime": "warmup", "ema50": None}
+                        want = "trend_up" if pos.side == "long" else "trend_down"
+                        if params.require_regime and reg["regime"] not in (want, "warmup"):
+                            pending_exit = "regime_flip"
+                        elif reg["ema50"] is not None and (
+                            (pos.side == "long" and c < reg["ema50"])
+                            or (pos.side == "short" and c > reg["ema50"])
+                        ):
+                            pending_exit = "ema50_break"
+                        elif i - pos.entry_index >= time_stop_bars:
+                            pending_exit = "time_stop"
+
+        # Intrabar drawdown: mark the worst plausible point of the bar, not
+        # just the closed-trade equity. The pre-exit mark uses the position as
+        # it stood at the bar's open (bounded by its stop); the post-exit mark
+        # uses the remaining size and the stop that is live after any TP1.
+        if ts >= start_ms:
+            if had_pos:
+                adverse_pre = l if side_start == "long" else h
+                adverse_pre = (max(adverse_pre, stop_start) if side_start == "long"
+                               else min(adverse_pre, stop_start))
+                pre_mark = (equity_at_start + realized_start
+                            + unrealized(side_start, entry_start, adverse_pre, qty_start))
+                if pos is not None:
+                    adverse_post = l if pos.side == "long" else h
+                    adverse_post = (max(adverse_post, pos.stop) if pos.side == "long"
+                                    else min(adverse_post, pos.stop))
+                    post_mark = (equity_at_start + pos.realized
+                                 + unrealized(pos.side, pos.entry, adverse_post, pos.qty))
+                    worst = min(pre_mark, post_mark)
+                    close_mark = (equity_at_start + pos.realized
+                                  + unrealized(pos.side, pos.entry, c, pos.qty))
                 else:
-                    tp2_hit = (h >= pos.tp2) if pos.side == "long" else (l <= pos.tp2)
-                    if tp2_hit:
-                        close_position(pos.tp2, ts, pos.qty, "tp2")
-                        continue
-
-                idx = (((int(ts) // FOUR_H) * FOUR_H - FOUR_H) - h4_start) // FOUR_H
-                reg = regime_at[idx] if 0 <= idx < len(regime_at) else {"regime": "warmup",
-                                                                       "ema50": None}
-                want = "trend_up" if pos.side == "long" else "trend_down"
-                if params.require_regime and reg["regime"] not in (want, "warmup"):
-                    pending_exit = "regime_flip"
-                    continue
-                if reg["ema50"] is not None:
-                    if pos.side == "long" and c < reg["ema50"]:
-                        pending_exit = "ema50_break"
-                        continue
-                    if pos.side == "short" and c > reg["ema50"]:
-                        pending_exit = "ema50_break"
-                        continue
-                if i - pos.entry_index >= time_stop_bars:
-                    pending_exit = "time_stop"
-                    continue
+                    worst = min(pre_mark, equity)
+                    close_mark = equity
+                worst = max(worst, 0.0)
+                peak_equity = max(peak_equity, close_mark)
+                if peak_equity > 0:
+                    max_dd = max(max_dd, (peak_equity - worst) / peak_equity * 100.0)
+            else:
+                peak_equity = max(peak_equity, equity)
 
         # ---- new signal ---------------------------------------------------- #
-        if pos is not None or ts < start_ms or ts >= end_ms:
+        if ruined or pos is not None or ts < start_ms or ts >= end_ms:
             continue
         if None in (e20[i], e50[i], a14[i], e20[i - 1]):
             continue
@@ -424,9 +522,12 @@ def simulate(prep: dict[str, Any], params: Params,
             else entry - params.tp1_r * risk_dist
         tp2 = entry + tp2_r * risk_dist if side == "long" else entry - tp2_r * risk_dist
 
+        lev = (qty * entry) / equity if equity > 0 else 0.0
+        liq_price = liquidation_price(side, entry, lev)
         pos = Position(side=side, entry_ts=int(rows[i + 1][0]), entry=entry, stop=stop,
                        tp1=tp1, tp2=tp2, qty=qty, risk_amount=risk_amount,
-                       risk_dist=risk_dist, initial_qty=qty, entry_index=i + 1)
+                       risk_dist=risk_dist, initial_qty=qty, entry_index=i + 1,
+                       leverage=lev, liq_price=liq_price)
         fee = entry * qty * FEE_BPS / 10_000
         pos.fees += fee
         pos.realized -= fee
@@ -434,23 +535,28 @@ def simulate(prep: dict[str, Any], params: Params,
     # force-close whatever is open at the window edge: no leaked positions
     if pos is not None:
         close_position(rows[-1][4], rows[-1][0], pos.qty, "window_end")
+    peak_equity = max(peak_equity, equity)
 
-    return _metrics(trades, equity0, equity)
+    return _metrics(trades, equity0, equity, max_dd=max_dd,
+                    same_bar_tp1_be=same_bar_tp1_be, ruined=ruined)
 
 
 def _metrics(trades: list[dict[str, Any]], equity0: float,
-             equity: float) -> dict[str, Any]:
+             equity: float, *, max_dd: float | None = None,
+             same_bar_tp1_be: int = 0, ruined: bool = False) -> dict[str, Any]:
     n = len(trades)
     wins = [t for t in trades if t["pnl"] > 0]
     losses = [t for t in trades if t["pnl"] <= 0]
     gw = sum(t["pnl"] for t in wins)
     gl = abs(sum(t["pnl"] for t in losses))
     eq = peak = equity0
-    max_dd = 0.0
+    closed_dd = 0.0
     for t in trades:
-        eq += t["pnl"]
+        # A wiped account cannot go below zero, so cap the closed-trade curve
+        # the same way the equity curve is capped.
+        eq = max(0.0, eq + t["pnl"])
         peak = max(peak, eq)
-        max_dd = max(max_dd, (peak - eq) / peak * 100.0)
+        closed_dd = max(closed_dd, (peak - eq) / peak * 100.0)
 
     mix: dict[str, int] = {}
     for t in trades:
@@ -461,7 +567,10 @@ def _metrics(trades: list[dict[str, Any]], equity0: float,
         "win_rate": round(len(wins) / n * 100, 2) if n else 0.0,
         "avg_r": round(sum(t["r"] for t in trades) / n, 3) if n else 0.0,
         "profit_factor": round(gw / gl, 3) if gl else None,
-        "max_drawdown_pct": round(max_dd, 2),
+        "max_drawdown_pct": round(max_dd if max_dd is not None else closed_dd, 2),
+        "max_drawdown_closed_pct": round(closed_dd, 2),
+        "same_bar_tp1_be": same_bar_tp1_be,
+        "ruined": ruined,
         "total_return_pct": round((equity - equity0) / equity0 * 100, 3),
         "final_equity": round(equity, 2),
         "fees_paid": round(sum(t["fees"] for t in trades), 2),
@@ -613,6 +722,7 @@ def main() -> int:
         "mode": args.mode,
         "range": {"start": args.start, "end": args.end},
         "config": {"fee_bps": FEE_BPS, "slip_bps": SLIP_BPS,
+                   "mmr": MMR, "liq_fee_bps": LIQ_FEE_BPS,
                    "warmup_days": args.warmup_days},
         "results": [],
     }
