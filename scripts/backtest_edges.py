@@ -57,7 +57,7 @@ from backtest_trend import (  # noqa: E402
     slip,
 )
 
-STRATEGIES = ("carry", "orb", "range")
+STRATEGIES = ("carry", "orb", "range", "squeeze")
 
 
 @dataclass(frozen=True)
@@ -71,6 +71,8 @@ class EdgeParams:
     or_hours: int = 4
     dev_atr: float = 2.0
     vol_mult: float = 1.2
+    lookback_bars: int = 120
+    squeeze_pct: float = 0.04
     require_regime: bool = True
     risk_pct: float = 0.5
     max_leverage: float = 3.0
@@ -80,6 +82,9 @@ class EdgeParams:
             return f"carry_f{self.entry_bp:g}_x{self.exit_bp:g}_h{self.max_bars}_s{self.stop_atr:g}"
         if self.name == "orb":
             return f"orb_h{self.or_hours}_v{self.vol_mult:g}_s{self.stop_atr:g}_t{self.tp_r:g}"
+        if self.name == "squeeze":
+            return (f"sq_l{self.lookback_bars}_w{self.squeeze_pct:g}_"
+                    f"s{self.stop_atr:g}_t{self.tp_r:g}")
         return f"range_d{self.dev_atr:g}_s{self.stop_atr:g}_t{self.tp_r:g}_rg{int(self.require_regime)}"
 
 
@@ -100,6 +105,13 @@ GRIDS: dict[str, list[EdgeParams]] = {
         EdgeParams("range", dev_atr=d, stop_atr=s, tp_r=t, max_bars=m)
         for d, s, t, m in itertools.product(
             [1.5, 2.0, 2.5], [1.0, 1.5], [1.0, 2.0], [24, 72]
+        )
+    ],
+    "squeeze": [
+        EdgeParams("squeeze", lookback_bars=l, squeeze_pct=w, stop_atr=s,
+                   tp_r=t, max_bars=120)
+        for l, w, s, t in itertools.product(
+            [72, 120, 168], [0.04, 0.08], [1.5], [2.0, 4.0]
         )
     ],
 }
@@ -138,6 +150,20 @@ def build_context(prep: dict[str, Any], params: EdgeParams) -> dict[str, Any]:
     or_high: list[float | None] = [None] * n
     or_low: list[float | None] = [None] * n
     day_end: list[bool] = [False] * n
+    sq_high: list[float | None] = [None] * n
+    sq_low: list[float | None] = [None] * n
+    sq_width: list[float | None] = [None] * n
+    if params.name == "squeeze":
+        lb = params.lookback_bars
+        for i in range(lb, n):
+            window = rows[i - lb: i]          # excludes the signal bar itself
+            hi = max(r[2] for r in window)
+            lo = min(r[3] for r in window)
+            base = rows[i - 1][4]
+            if base > 0:
+                sq_high[i] = hi
+                sq_low[i] = lo
+                sq_width[i] = (hi - lo) / base
     if params.name == "orb":
         first: dict[int, list[list[float]]] = {}
         for i, d in enumerate(day_id):
@@ -153,7 +179,8 @@ def build_context(prep: dict[str, Any], params: EdgeParams) -> dict[str, Any]:
 
     return {"last_funding": last_funding, "vol_ma": vol_ma, "day_id": day_id,
             "bar_in_day": bar_in_day, "or_high": or_high, "or_low": or_low,
-            "day_end": day_end}
+            "day_end": day_end, "sq_high": sq_high, "sq_low": sq_low,
+            "sq_width": sq_width}
 
 
 # --------------------------------------------------------------------------- #
@@ -206,6 +233,29 @@ def signal(prep: dict[str, Any], ctx: dict[str, Any], params: EdgeParams,
         stop = c - params.stop_atr * atr_i if side == "long" \
             else c + params.stop_atr * atr_i
         return Setup(side, stop, None, params.max_bars, "orb")
+
+    if params.name == "squeeze":
+        hi, lo, width = ctx["sq_high"][i], ctx["sq_low"][i], ctx["sq_width"][i]
+        vol_ma = ctx["vol_ma"][i]
+        if hi is None or lo is None or width is None or vol_ma is None:
+            return None
+        regime = _regime(prep, rows[i][0])
+        if params.require_regime and regime not in ("squeeze", "range"):
+            return None
+        if width > params.squeeze_pct:
+            return None
+        if v < params.vol_mult * vol_ma:
+            return None
+        if c > hi:
+            side = "long"
+        elif c < lo:
+            side = "short"
+        else:
+            return None
+        stop = c - params.stop_atr * atr_i if side == "long" \
+            else c + params.stop_atr * atr_i
+        return Setup(side, stop, None, params.max_bars,
+                     f"squeeze_{width * 100:.1f}pct_{regime}")
 
     # range mean reversion
     regime = _regime(prep, rows[i][0])

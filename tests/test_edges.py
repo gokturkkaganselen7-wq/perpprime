@@ -122,3 +122,40 @@ def test_range_fade_refuses_a_trend_regime():
     res = _run(_prep(candles, regime="trend_down"), params)
 
     assert res["trades"] == 0
+
+
+def test_squeeze_breakout_enters_on_a_tight_range_break():
+    """A 3-day range under 4% plus a volume break is the squeeze setup."""
+    candles = _flat(190, 100.0)
+    candles += [(100.0, 101.5, 100.0, 101.0)]     # bar 190: break above the range
+    candles += _flat(10, 101.0)
+    volumes = [1.0] * len(candles)
+    volumes[190] = 5.0                             # volume shock
+    prep = _prep(candles, volumes=volumes, regime="squeeze")
+    params = EdgeParams("squeeze", lookback_bars=72, squeeze_pct=0.04,
+                        stop_atr=1.5, tp_r=10.0, max_bars=120)
+
+    res = _run(prep, params)
+
+    assert res["trades"] == 1
+    trade = res["trades_detail"][0]
+    assert trade["side"] == "long"
+    assert trade["entry_ts"] == "1970-01-08 23:00"   # bar 191
+    assert trade["entry"] == pytest.approx(101.0 * (1 + SLIP_BPS / 10_000))
+
+
+def test_squeeze_refuses_a_wide_range():
+    candles = _flat(190, 100.0)
+    candles += [(100.0, 101.5, 100.0, 101.0)] + _flat(10, 101.0)
+    # 10% wide range: no squeeze.
+    for i in range(120, 190):
+        candles[i] = (100.0, 105.0, 95.0, 100.0)
+    volumes = [1.0] * len(candles)
+    volumes[190] = 5.0
+    prep = _prep(candles, volumes=volumes, regime="squeeze")
+    params = EdgeParams("squeeze", lookback_bars=72, squeeze_pct=0.04,
+                        stop_atr=1.5, tp_r=10.0, max_bars=120)
+
+    res = _run(prep, params)
+
+    assert res["trades"] == 0
