@@ -204,9 +204,16 @@ emir göndermez.
 
 ## Backtest
 
+> **Düzeltme (2026-11-22).** v1.0.0 backtest'i girişleri **sinyal barının
+> açılışından** dolduruyordu — bir bar look-ahead. Hata düzeltildi, tüm
+> sonuçlar sıfırdan üretildi. **Düzeltilmiş sonuçlar trend kurallarının edge
+> göstermediğini söylüyor: 15 hücrenin 12'si negatif, PF 0.38–1.00, 12 aylık
+> DD %7.5–15.9.** Eski sayılar geri çekildi.
+
 `scripts/backtest_trend.py` trend kurallarını gerçek Bybit perpetual verisinde
 test eder: funding maliyeti, 5.5 bps taker + 2 bps kayma, look-ahead yok
-(sinyal kapanışta, fill sonraki bar açılışında), walk-forward ve ablasyon.
+(sinyal kapanışta, fill **sonraki bar açılışında**), walk-forward ve ablasyon.
+Giriş fiyatı kuralı `tests/test_backtest.py` ile kilitlidir.
 
 ```bash
 PYTHONPATH=src .venv/bin/python scripts/backtest_trend.py --mode single \
@@ -219,7 +226,8 @@ PYTHONPATH=src .venv/bin/python scripts/backtest_trend.py --mode walkforward \
 ```
 
 Sonuçlar, karşılaştırmalar ve ölçülmeyen riskler:
-**[docs/BACKTEST.md](docs/BACKTEST.md)**.
+**[docs/BACKTEST.md](docs/BACKTEST.md)**. Denetim ve düzeltmeler:
+**[docs/AUDIT_2026-11-22.md](docs/AUDIT_2026-11-22.md)**.
 
 ---
 
@@ -235,7 +243,7 @@ cfos/
 ├── skills/                       # 24 SKILL.md + registry audit
 ├── src/cfos/                     # Python çekirdeği
 ├── tests/                        # pytest
-├── docs/                         # SAFETY, LIVE_CHECKLIST, ARCHITECTURE, BACKTEST
+├── docs/                         # SAFETY, LIVE_CHECKLIST, ARCHITECTURE, BACKTEST, AUDIT
 └── data/                         # SQLite + paper state (git dışı)
 ```
 
@@ -243,6 +251,10 @@ cfos/
 
 ## v1 sınırları (dürüst liste)
 
+- **Canlı işlem için onay yok.** 2026-11-22 denetiminde backtest'teki
+  look-ahead hatası düzeltildi; düzeltilmiş sonuçlar trend kurallarında
+  pozitif beklenti göstermiyor. Strateji yeniden tasarlanmadan gerçek
+  sermaye kullanılmamalı.
 - Yerleşik `cfos backtest` komutu **yok**; sayı üretmek için
   `scripts/backtest_trend.py` kullanılır. `cfos-backtest`/`cfos-walk-forward`
   skill'leri bu script olmadan sonuç uydurmaz.
