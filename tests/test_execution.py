@@ -39,6 +39,7 @@ class FakeVenue(BaseExchange):
         self._positions: list[PositionSnapshot] = []
         self.requests = []
         self.closed: list[float | None] = []
+        self.cancelled: list[str] = []
         self.polls = 0
         self.snapshot = MarketSnapshot(
             symbol=SYMBOL,
@@ -91,7 +92,7 @@ class FakeVenue(BaseExchange):
         )
 
     def cancel(self, order_id: str, symbol: str) -> None:
-        pass
+        self.cancelled.append(order_id)
 
     def cancel_all(self, symbol: str) -> None:
         pass
@@ -497,6 +498,33 @@ def test_partial_entry_sizes_the_bracket_to_the_filled_qty(settings, monkeypatch
     rows = Journal(settings.db_path).open_positions()
     assert len(rows) == 1
     assert rows[0]["qty"] == pytest.approx(0.03)
+
+
+def test_partial_entry_cancels_residual_and_uses_venue_size(settings, monkeypatch):
+    fake = FakeVenue(
+        OrderResult(
+            id="e1",
+            client_id=None,
+            status="open",
+            filled=0.03,
+            avg_price=65_000.0,
+        ),
+        visible_after_entry=[venue_position(0.02)],
+    )
+    monkeypatch.setattr("cfos.execution.build_exchange", lambda _settings: fake)
+
+    report = execute(settings, make_plan(settings))
+
+    assert report.verdict is Verdict.EXECUTED, report.messages
+    assert fake.cancelled == ["e1"]
+    assert report.position is not None
+    assert report.position["qty"] == pytest.approx(0.02)
+    assert any("residual entry cancelled" in m for m in report.messages)
+    assert any("bracketing the venue size" in m for m in report.messages)
+
+    entry, stop, *tps = fake.requests
+    assert stop.amount == pytest.approx(0.02)
+    assert sum(tp.amount for tp in tps) == pytest.approx(0.02)
 
 
 def test_unconfirmed_entry_closes_a_visible_venue_position(settings, monkeypatch):

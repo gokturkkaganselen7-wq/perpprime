@@ -233,9 +233,28 @@ class CcxtExchange(BaseExchange):
     def balance(self) -> float:
         self.load()
         balance = self.ex.fetch_balance()
-        total = balance.get("USDT", {}).get("total")
+        # Risk limits must react to open losses. ccxt's parsed `total` for
+        # Bybit is the wallet balance (unrealised PnL excluded), so prefer the
+        # venue's equity: totalEquity on UNIFIED, equity on CONTRACT/SPOT.
+        info = balance.get("info") or {}
+        result = info.get("result") or {}
+        entries = result.get("list")
+        if isinstance(entries, list):
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                equity = entry.get("totalEquity")
+                if equity is None:
+                    equity = entry.get("equity")
+                if equity is not None:
+                    return float(equity)
+                for coin in entry.get("coin") or []:
+                    if coin.get("coin") == "USDT" and coin.get("equity") is not None:
+                        return float(coin["equity"])
+        usdt = balance.get("USDT") or {}
+        total = usdt.get("total")
         if total is None:
-            total = balance.get("total", {}).get("USDT")
+            total = (balance.get("total") or {}).get("USDT")
         return float(total or 0.0)
 
     def set_leverage(self, symbol: str, leverage: float) -> None:

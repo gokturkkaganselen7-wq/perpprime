@@ -379,7 +379,11 @@ def evaluate_gates(
         else:
             gates.append(_allow("spread", f"{spread_bps:.1f} bps"))
     else:
-        gates.append(_allow("spread", "unknown (no order book snapshot)"))
+        # No order book means we cannot verify liquidity or spread. Trading
+        # blind is exactly what a risk gate exists to prevent.
+        gates.append(
+            _block("spread", "spread unknown (no order book snapshot); refusing to trade blind")
+        )
 
     if plan.leverage > risk.max_leverage + 1e-9:
         gates.append(

@@ -403,7 +403,9 @@ def simulate(prep: dict[str, Any], params: Params,
         if side is None or stop is None or i + 1 >= len(rows):
             continue
 
-        entry = slip(o, side, entering=True)
+        # Fill at the NEXT bar's open: the signal only exists once bar i has
+        # closed, so using this bar's open would be look-ahead bias.
+        entry = slip(rows[i + 1][1], side, entering=True)
         risk_dist = (entry - stop) if side == "long" else (stop - entry)
         if risk_dist <= 0 or risk_dist > 2.5 * atr_i:
             continue
@@ -502,7 +504,20 @@ def score(res: dict[str, Any], min_trades: int) -> tuple[float, float]:
 def walk_forward(prep: dict[str, Any], start_ms: int, end_ms: int,
                  train_days: int, test_days: int, step_days: int,
                  equity0: float = 10_000.0,
-                 min_train_trades: int = 15) -> dict[str, Any]:
+                 min_train_trades: int = 15,
+                 base_params: Params | None = None) -> dict[str, Any]:
+    base = base_params or Params()
+    grid = [
+        replace(
+            base,
+            stop_atr=p.stop_atr,
+            tp1_r=p.tp1_r,
+            require_pullback=(base.require_pullback and p.require_pullback),
+            require_regime=base.require_regime,
+            time_stop_days=p.time_stop_days,
+        )
+        for p in GRID
+    ]
     windows: list[dict[str, Any]] = []
     t0 = start_ms
     while True:
@@ -513,15 +528,15 @@ def walk_forward(prep: dict[str, Any], start_ms: int, end_ms: int,
 
         best = None
         best_score = (-2.0, -2.0)
-        for p in GRID:
+        for p in grid:
             r = simulate(prep, p, t0, train_end, equity0)
             s = score(r, min_train_trades)
             if s > best_score:
                 best_score, best = s, (p, r)
 
-        chosen = best[0] if best else GRID[0]
+        chosen = best[0] if best else grid[0]
         oos = simulate(prep, chosen, train_end, test_end, equity0)
-        fixed = simulate(prep, Params(), train_end, test_end, equity0)
+        fixed = simulate(prep, base, train_end, test_end, equity0)
 
         windows.append({
             "train": f"{iso(t0)[:10]} -> {iso(train_end)[:10]}",
@@ -578,7 +593,16 @@ def main() -> int:
     ap.add_argument("--test-days", type=int, default=30)
     ap.add_argument("--step-days", type=int, default=30)
     ap.add_argument("--json-out", default="")
+    ap.add_argument("--no-pullback", action="store_true",
+                    help="ablation: drop the pullback filter")
+    ap.add_argument("--no-regime", action="store_true",
+                    help="ablation: drop the 4h regime filter")
     args = ap.parse_args()
+
+    base_params = Params(
+        require_pullback=not args.no_pullback,
+        require_regime=not args.no_regime,
+    )
 
     start_ms = parse_day(args.start)
     end_ms = parse_day(args.end)
@@ -603,7 +627,7 @@ def main() -> int:
             prep = prepare(symbol, tf, rows, funding)
 
             if args.mode == "single":
-                res = simulate(prep, Params(), start_ms, end_ms)
+                res = simulate(prep, base_params, start_ms, end_ms)
                 res.update({"symbol": symbol, "timeframe": tf})
                 payload["results"].append(res)
                 print(f"[res ] {symbol} {tf} trades={res['trades']} "
@@ -612,7 +636,8 @@ def main() -> int:
                       file=sys.stderr)
             else:
                 wf = walk_forward(prep, start_ms, end_ms, args.train_days,
-                                  args.test_days, args.step_days)
+                                  args.test_days, args.step_days,
+                                  base_params=base_params)
                 wf.update({"symbol": symbol, "timeframe": tf,
                            "aggregate": aggregate_windows(wf["windows"])})
                 payload["results"].append(wf)

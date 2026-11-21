@@ -1,3 +1,5 @@
+import pytest
+
 from cfos.exchange import step_from_market, venue_leverage
 
 
@@ -100,3 +102,34 @@ def test_venue_leverage_rounds_up_and_never_goes_below_one():
     assert venue_leverage(2.0) == 2
     assert venue_leverage(3.0) == 3
     assert venue_leverage(1.0000001) == 2
+
+
+def test_balance_includes_unrealised_pnl():
+    """Risk limits must see open losses, not just the wallet balance."""
+    from cfos.exchange import CcxtExchange
+
+    class FakeClient:
+        def fetch_balance(self):
+            return {
+                "info": {
+                    "result": {
+                        "list": [
+                            {
+                                "accountType": "UNIFIED",
+                                "totalEquity": "9750.0",
+                                "totalWalletBalance": "10000.0",
+                                "totalPerpUPL": "-250.0",
+                            }
+                        ]
+                    }
+                },
+                # ccxt maps Bybit's walletBalance to `total`; using it would
+                # hide the 250 USDT open loss.
+                "USDT": {"total": 10000.0, "free": 9000.0, "used": 1000.0},
+            }
+
+    ex = CcxtExchange.__new__(CcxtExchange)
+    ex.ex = FakeClient()
+    ex.load = lambda: None
+
+    assert ex.balance() == pytest.approx(9750.0)

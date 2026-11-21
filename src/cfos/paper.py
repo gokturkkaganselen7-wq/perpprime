@@ -128,7 +128,11 @@ class PaperExchange(BaseExchange):
         return self._public_price(symbol)
 
     def market(self, symbol: str) -> MarketSnapshot:
-        return MarketSnapshot(symbol=symbol, price=self.price(symbol), ts=utcnow())
+        # Paper fills at the mark with no book; report a measured zero spread
+        # so the fail-closed live spread gate does not block simulations.
+        return MarketSnapshot(
+            symbol=symbol, price=self.price(symbol), spread_bps=0.0, ts=utcnow()
+        )
 
     def equity(self) -> float:
         unrealized = 0.0

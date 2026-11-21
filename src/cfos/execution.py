@@ -383,9 +383,43 @@ def execute(
             messages.append(defensive_close(settings, exchange, plan.symbol))
             return finish(Verdict.ERROR, messages, orders)
 
-        fill_price = entry.avg_price or snapshot.price
         warnings = list(plan.warnings)
         if filled_qty + 1e-12 < plan.qty:
+            # A partially filled market order can leave a live residual. Cancel
+            # it before bracketing: a later unprotected fill is worse than a
+            # smaller position now.
+            if entry.id and entry.status not in ("closed", "filled"):
+                try:
+                    exchange.cancel(entry.id, plan.symbol)
+                    warnings.append("residual entry cancelled before bracketing")
+                except Exception as exc:  # noqa: BLE001 - report, keep the bracket
+                    warnings.append(
+                        f"could not cancel residual entry ({type(exc).__name__}: {exc}); "
+                        "the reduce-only bracket still covers the filled size"
+                    )
+            # The order report can lag the venue; the position is authoritative.
+            try:
+                live = [
+                    p
+                    for p in exchange.positions()
+                    if p.symbol == plan.symbol and abs(p.qty) > 0
+                ]
+            except Exception:  # noqa: BLE001 - fall back to the order report
+                live = []
+            if live:
+                venue_qty = abs(live[0].qty)
+                if abs(venue_qty - filled_qty) > 1e-12:
+                    warnings.append(
+                        f"venue position {venue_qty:g} differs from order fill "
+                        f"{filled_qty:g}; bracketing the venue size"
+                    )
+                filled_qty = venue_qty
+            if filled_qty <= 0:
+                messages = [
+                    "residual entry cancelled and the venue shows no position; "
+                    "nothing to bracket"
+                ]
+                return finish(Verdict.ERROR, messages, orders)
             warnings.append(
                 f"partial entry: {filled_qty:g} of {plan.qty:g} filled; "
                 "bracket covers the filled size only"
@@ -395,6 +429,8 @@ def execute(
                 f"entry reported status {entry.status!r}; "
                 "only the visible filled quantity is bracketed"
             )
+
+        fill_price = entry.avg_price or snapshot.price
         if isinstance(exchange, PaperExchange):
             exchange.tag_position(
                 plan.symbol, position_id=plan.id, risk_amount=plan.risk_amount

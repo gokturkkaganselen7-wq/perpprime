@@ -124,9 +124,21 @@ def _gate_names(gates):
 
 def test_clean_plan_has_no_blocks():
     gates = evaluate_gates(
-        state=state(), plan=plan(), risk=RiskConfig(), market_age_sec=1
+        state=state(),
+        plan=plan(),
+        risk=RiskConfig(),
+        market_age_sec=1,
+        spread_bps=1.0,
     )
     assert _gate_names(gates) == set()
+
+
+def test_missing_spread_blocks():
+    """No order book means no measured spread: refuse to trade blind."""
+    gates = evaluate_gates(
+        state=state(), plan=plan(), risk=RiskConfig(), market_age_sec=1
+    )
+    assert "spread" in _gate_names(gates)
 
 
 def test_kill_switch_blocks():
