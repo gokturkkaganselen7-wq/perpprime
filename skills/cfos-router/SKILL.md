@@ -28,14 +28,16 @@ Sayı gerekiyorsa ilgili skill'in komutu çalıştırılır:
 
 ```
 S0  cfos status --json          → kill switch, equity, drawdown, heat
+S0.5 cfos allocate --json       → rejim + ölçülmüş edge; NO_TRADE ise dur
 S1  cfos route --text "..."     → niyet + zincir + kapılar
 S2  zinciri sırayla yürüt       → her skill kendi çıktısını üretir
 S3  cfos plan / cfos execute    → yalnızca son adımda risk
 ```
 
 **Değişmez kural: önce kapı, sonra fikir.**
-`kill_switch.engaged=true` ise hiçbir alım hattı kurulmaz. `cfos kill --release`
-kullanıcı nedeni anladığını söylemeden çalıştırılmaz.
+`kill_switch.engaged=true` ise hiçbir alım hattı kurulmaz. `cfos allocate`
+`NO_TRADE` dönerse mevcut rejimde ölçülmüş edge yoktur; yeni risk açılmaz.
+`cfos kill --release` kullanıcı nedeni anladığını söylemeden çalıştırılmaz.
 
 ## 2. Niyet tablosu
 

@@ -1,0 +1,235 @@
+{
+  "updated": "2026-11-22",
+  "tier": "S",
+  "source": "docs/BACKTEST.md, docs/EDGES_2026-11-22.md, docs/RESEARCH_2026-11-22.md",
+  "criteria": {
+    "net_oos_positive": true,
+    "positive_windows_min": 8,
+    "windows_total": 9,
+    "profit_factor_min": 1.5,
+    "max_drawdown_pct": 8.0,
+    "oos_trades_min": 200,
+    "survive_2x_costs": true
+  },
+  "strategies": [
+    {
+      "name": "trend",
+      "skill": "cfos-trend",
+      "chain": [
+        "cfos-regime",
+        "cfos-trend",
+        "cfos-sizing",
+        "cfos-execution"
+      ],
+      "regimes": [
+        "trend_up",
+        "trend_down"
+      ],
+      "status": "NO_EDGE",
+      "oos_avg": -0.36,
+      "positive_windows": 3,
+      "windows": 9,
+      "pf": 0.86,
+      "max_dd": 4.1,
+      "oos_trades": 250,
+      "evidence": "docs/BACKTEST.md",
+      "note": "12/15 one-hour cells negative; walk-forward negative on all three symbols",
+      "pf_scope": "12m single-run average (squeeze: BTC, ETH had no winners)"
+    },
+    {
+      "name": "funding_carry_single",
+      "skill": "cfos-funding-carry",
+      "chain": [
+        "cfos-derivatives-sentiment",
+        "cfos-funding-carry",
+        "cfos-sizing",
+        "cfos-execution"
+      ],
+      "regimes": [
+        "range",
+        "trend_up",
+        "trend_down"
+      ],
+      "status": "NO_EDGE",
+      "oos_avg": -0.99,
+      "positive_windows": 2,
+      "windows": 9,
+      "pf": 0.85,
+      "max_dd": 13.6,
+      "oos_trades": 366,
+      "evidence": "docs/EDGES_2026-11-22.md",
+      "note": "Single-leg carry is directional; funding income does not cover price risk",
+      "pf_scope": "12m single-run average (squeeze: BTC, ETH had no winners)"
+    },
+    {
+      "name": "opening_range_breakout",
+      "skill": "cfos-breakout",
+      "chain": [
+        "cfos-regime",
+        "cfos-breakout",
+        "cfos-sizing",
+        "cfos-execution"
+      ],
+      "regimes": [
+        "range",
+        "squeeze"
+      ],
+      "status": "NO_EDGE",
+      "oos_avg": -2.44,
+      "positive_windows": 2,
+      "windows": 9,
+      "pf": 0.75,
+      "max_dd": 9.9,
+      "oos_trades": 752,
+      "evidence": "docs/EDGES_2026-11-22.md",
+      "note": "~1000 trades a year; fees alone exceed any gross edge",
+      "pf_scope": "12m single-run average (squeeze: BTC, ETH had no winners)"
+    },
+    {
+      "name": "range_mean_reversion",
+      "skill": "cfos-mean-reversion",
+      "chain": [
+        "cfos-regime",
+        "cfos-mean-reversion",
+        "cfos-derivatives-sentiment",
+        "cfos-sizing"
+      ],
+      "regimes": [
+        "range",
+        "squeeze"
+      ],
+      "status": "NO_EDGE",
+      "oos_avg": -1.0,
+      "positive_windows": 1,
+      "windows": 9,
+      "pf": 0.8,
+      "max_dd": 5.9,
+      "oos_trades": 162,
+      "evidence": "docs/EDGES_2026-11-22.md",
+      "note": "Fade works in-sample in one month and fails out of sample",
+      "pf_scope": "12m single-run average (squeeze: BTC, ETH had no winners)"
+    },
+    {
+      "name": "squeeze_breakout",
+      "skill": "cfos-breakout",
+      "chain": [
+        "cfos-regime",
+        "cfos-breakout",
+        "cfos-sizing",
+        "cfos-execution"
+      ],
+      "regimes": [
+        "range",
+        "squeeze"
+      ],
+      "status": "NO_EDGE",
+      "oos_avg": -0.85,
+      "positive_windows": 1,
+      "windows": 9,
+      "pf": 0.38,
+      "max_dd": 4.5,
+      "oos_trades": 120,
+      "evidence": "docs/RESEARCH_2026-11-22.md",
+      "note": "Squeeze regime is 1.5% of 4h bars; too thin and still negative",
+      "pf_scope": "12m single-run average (squeeze: BTC, ETH had no winners)"
+    },
+    {
+      "name": "basis_carry",
+      "skill": "cfos-funding-carry",
+      "chain": [
+        "cfos-derivatives-sentiment",
+        "cfos-funding-carry",
+        "cfos-sizing",
+        "cfos-execution"
+      ],
+      "regimes": [
+        "range",
+        "trend_up",
+        "trend_down",
+        "squeeze"
+      ],
+      "status": "FEE_BLOCKED",
+      "oos_avg": -1.74,
+      "positive_windows": 0,
+      "windows": 9,
+      "pf": 0.0,
+      "max_dd": 9.4,
+      "oos_trades": 261,
+      "evidence": "docs/RESEARCH_2026-11-22.md",
+      "note": "Gross edge positive 9/9; retail fees are 8-21x the funding income",
+      "pf_scope": "12m single-run average (squeeze: BTC, ETH had no winners)"
+    },
+    {
+      "name": "cross_sectional_momentum",
+      "skill": "cfos-trend",
+      "chain": [
+        "cfos-regime",
+        "cfos-trend",
+        "cfos-sizing",
+        "cfos-execution"
+      ],
+      "regimes": [
+        "trend_up",
+        "trend_down"
+      ],
+      "status": "NO_EDGE",
+      "oos_avg": -1.55,
+      "positive_windows": 1,
+      "windows": 9,
+      "pf": 0.97,
+      "max_dd": 5.9,
+      "oos_trades": 224,
+      "evidence": "docs/RESEARCH_2026-11-22.md",
+      "note": "Gross PF 1.075, DD 14.6%; fees turn it negative and walk-forward 1/9",
+      "pf_scope": "12m single-run average (squeeze: BTC, ETH had no winners)"
+    },
+    {
+      "name": "funding_dispersion",
+      "skill": "cfos-funding-carry",
+      "chain": [
+        "cfos-derivatives-sentiment",
+        "cfos-funding-carry",
+        "cfos-sizing",
+        "cfos-execution"
+      ],
+      "regimes": [
+        "range",
+        "trend_up",
+        "trend_down"
+      ],
+      "status": "NO_EDGE",
+      "oos_avg": 0.18,
+      "positive_windows": 3,
+      "windows": 9,
+      "pf": 0.99,
+      "max_dd": 11.1,
+      "oos_trades": 25,
+      "evidence": "docs/RESEARCH_2026-11-22.md",
+      "note": "Positive in one start date, negative in another; path-dependent and too few trades",
+      "pf_scope": "12m single-run average (squeeze: BTC, ETH had no winners)"
+    },
+    {
+      "name": "daily_trend",
+      "skill": "cfos-trend",
+      "chain": [
+        "cfos-regime",
+        "cfos-trend",
+        "cfos-sizing",
+        "cfos-execution"
+      ],
+      "regimes": [
+        "trend_up",
+        "trend_down"
+      ],
+      "status": "NO_EDGE",
+      "oos_avg": -0.98,
+      "positive_windows": 5,
+      "windows": 14,
+      "pf": 1.2,
+      "max_dd": 36.6,
+      "oos_trades": 194,
+      "evidence": "docs/RESEARCH_2026-11-22.md",
+      "note": "Positive in 2023/2024/12m in-sample but 5/14 OOS windows; 37% DD"
+    }
+  ]
+}

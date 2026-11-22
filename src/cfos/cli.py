@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__, doctor as doctor_mod
+from .allocator import allocate, load_registry
 from .analysis import compute_regime
 from .config import ConfigError, Settings, load_settings
 from .execution import (
@@ -126,6 +127,32 @@ def cmd_regime(settings: Settings, args: argparse.Namespace) -> int:
         funding_rate=snapshot.funding_rate,
     )
     _emit(report.to_dict(), args.json)
+    return 0
+
+
+def cmd_allocate(settings: Settings, args: argparse.Namespace) -> int:
+    if args.regime:
+        regime = args.regime
+    else:
+        exchange = build_exchange(settings)
+        candles = exchange.ohlcv(args.symbol, args.tf, args.limit)
+        snapshot = public_market_snapshot(settings, args.symbol)
+        regime = compute_regime(
+            candles,
+            symbol=args.symbol,
+            timeframe=args.tf,
+            funding_rate=snapshot.funding_rate,
+        ).regime
+    engaged, reason = KillSwitch(settings.kill_file).engaged()
+    allocation = allocate(
+        regime,
+        load_registry(),
+        kill_engaged=engaged,
+        allow_candidate=args.allow_candidate,
+    )
+    payload = allocation.to_dict()
+    payload["kill_switch"] = {"engaged": engaged, "reason": reason}
+    _emit(payload, args.json)
     return 0
 
 
@@ -435,6 +462,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=200)
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_regime)
+
+    p = sub.add_parser("allocate",
+                       help="regime-aware strategy selection (fail-closed)")
+    p.add_argument("--regime", default=None,
+                   choices=["trend_up", "trend_down", "range", "squeeze",
+                            "chaos", "warmup"])
+    p.add_argument("--symbol", default="BTC/USDT:USDT")
+    p.add_argument("--tf", default="4h")
+    p.add_argument("--limit", type=int, default=200)
+    p.add_argument("--allow-candidate", action="store_true",
+                   help="paper only: allow EDGE_CANDIDATE records")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_allocate)
 
     p = sub.add_parser("candles", help="raw OHLCV (mostly for debugging)")
     p.add_argument("symbol")

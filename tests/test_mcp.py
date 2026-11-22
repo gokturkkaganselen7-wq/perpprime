@@ -45,6 +45,7 @@ def test_tools_list_names(settings):
         "cfos_doctor",
         "cfos_market",
         "cfos_regime",
+        "cfos_allocate",
         "cfos_route",
         "cfos_size",
         "cfos_plan",
@@ -58,7 +59,7 @@ def test_tools_list_names(settings):
         "cfos_review",
     }
     assert names == expected
-    assert len(TOOLS) == 15
+    assert len(TOOLS) == 16
 
 
 def test_status_tool(settings):

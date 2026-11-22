@@ -13,6 +13,7 @@ import traceback
 from typing import Any
 
 from . import __version__, doctor as doctor_mod
+from .allocator import allocate, load_registry
 from .config import Settings
 from .execution import build_plan, close_position, execute, status, sync_paper
 from .exchange import build_exchange, public_market_snapshot
@@ -26,6 +27,8 @@ INSTRUCTIONS = """\
 CFOS is a crypto futures trading workspace. Rules that are not negotiable:
 
 1. Call cfos_status before any trade. If kill_switch.engaged is true, do not place risk.
+   Then call cfos_allocate: if it returns NO_TRADE, there is no measured edge in the current
+   regime and no new risk may be opened.
 2. Call cfos_size or cfos_plan; never invent a quantity. The risk kernel caps leverage,
    daily loss, weekly loss, drawdown, portfolio heat and correlation clusters.
 3. cfos_execute refuses when a gate blocks. Do not retry by changing the numbers to slip
@@ -91,6 +94,24 @@ TOOLS: list[dict[str, Any]] = [
                 "limit": {"type": "integer", "minimum": 60, "maximum": 1000},
             },
             "required": ["symbol"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "cfos_allocate",
+        "description": "Regime-aware strategy selection. Returns NO_TRADE unless a measured, confirmed edge exists for the current regime.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "regime": {
+                    "type": "string",
+                    "enum": ["trend_up", "trend_down", "range", "squeeze",
+                             "chaos", "warmup"],
+                },
+                "symbol": {"type": "string", "default": "BTC/USDT:USDT"},
+                "timeframe": {"type": "string", "default": "4h"},
+                "allow_candidate": {"type": "boolean", "default": False},
+            },
             "additionalProperties": False,
         },
     },
@@ -274,6 +295,32 @@ def call_tool(settings: Settings, name: str, args: dict[str, Any]) -> dict[str, 
             funding_rate=snapshot.funding_rate,
         )
         return _text(report.to_dict())
+
+    if name == "cfos_allocate":
+        from .analysis import compute_regime
+
+        if args.get("regime"):
+            regime = str(args["regime"])
+        else:
+            symbol = str(args.get("symbol") or "BTC/USDT:USDT")
+            timeframe = str(args.get("timeframe") or "4h")
+            exchange = build_exchange(settings)
+            candles = exchange.ohlcv(symbol, timeframe, 200)
+            snapshot = public_market_snapshot(settings, symbol)
+            regime = compute_regime(
+                candles, symbol=symbol, timeframe=timeframe,
+                funding_rate=snapshot.funding_rate,
+            ).regime
+        engaged, reason = KillSwitch(settings.kill_file).engaged()
+        allocation = allocate(
+            regime,
+            load_registry(),
+            kill_engaged=engaged,
+            allow_candidate=bool(args.get("allow_candidate")),
+        )
+        payload = allocation.to_dict()
+        payload["kill_switch"] = {"engaged": engaged, "reason": reason}
+        return _text(payload)
 
     if name == "cfos_route":
         plan = route(intent=args.get("intent"), text=args.get("text"))
