@@ -26,8 +26,8 @@ kanıt saydığımızı** tanımlar. Amaç getiri vaadi değil, ölçülebilir b
 | Ufuk | Tipik tutuş | Kullanılan sinyal | Ölçüldüğü yer |
 |---|---|---|---|
 | Intraday | 2–24 saat | 1h opening-range breakout | `docs/EDGES_2026-11-22.md` |
-| Swing | 1–5 gün | 1h trend devamı / range fade, 4h rejim | `docs/BACKTEST.md`, `docs/EDGES_2026-11-22.md` |
-| Carry | 8 saat–3 gün | 8h funding aşırılığı | `docs/EDGES_2026-11-22.md` |
+| Swing | 1–5 gün | 1h trend devamı / range fade / sıkışma, 4h rejim | `docs/BACKTEST.md`, `docs/EDGES_2026-11-22.md`, `docs/RESEARCH_2026-11-22.md` |
+| Carry | 8 saat–3 gün | 8h funding aşırılığı (tek bacak ve delta-neutral) | `docs/EDGES_2026-11-22.md`, `docs/RESEARCH_2026-11-22.md` |
 
 Scalping (dakikalar) kapsam dışı: 5.5 bps taker + 2 bps kayma ile maliyet
 yapısal olarak getiriden büyük.
@@ -52,34 +52,46 @@ Bu tablo **hedef değil, tavan**dır. Getiri hedefi aşağıda tanımlı değild
 çünkü kanıtlanmış edge olmadan getiri hedefi koymak zararı büyütmekten başka
 işe yaramaz.
 
-## 5. Kanıt standardı (önceden ilan edilir)
+## 5. Kanıt standardı — Tier S (önceden ilan edilir)
 
 Bir strateji "edge var" sayılmak için **hepsini** geçmek zorundadır:
 
 1. **Maliyet sonrası.** 5.5 bps taker + 2 bps kayma + gerçek funding
    düşüldükten sonra pozitif.
 2. **Look-ahead yok.** Sinyal kapanmış barda, fill sonraki bar açılışında.
+   Pencere sonunda açık pozisyon, pencere içindeki son barda kapanır.
 3. **Muhafazakâr belirsizlik.** Aynı barda stop ve hedef varsa stop önce;
    stop boşlukla atlanırsa açılıştan dolar; likidasyon modellenir.
-4. **Out-of-sample.** 90 gün train / 30 gün test, 30 gün adım, en az 9 pencere.
-   Pencerelerin **≥ %60'ı pozitif** ve ortalama > 0.
-5. **Örneklem.** Sembol başına OOS ≥ 30 işlem; toplam ≥ 100.
-6. **Risk.** 10.000 USDT'lik bacakta maksimum DD ≤ %10 (intrabar).
-7. **Dayanıklılık.** En az 2/3 sembolde PF ≥ 1.2; parametre komşuluğunda
-   çöküş yok (plato, sivri tepe değil).
-8. **Gerekçe.** Testten **önce** yazılmış ekonomik neden: bu edge kimin
-   zararını kim kazanıyor, ne zaman ölür?
+4. **Getiri tabanı.** OOS pencerelerinin ortalaması yıllıklandırıldığında
+   **≥ %40** (aylık ~%3). Bu bir hedef değil, kabul tabanıdır.
+5. **Out-of-sample.** En az 9 pencere; pencerelerin **≥ 8/9'u pozitif** ve
+   ortalama > 0.
+6. **Örneklem.** Toplam OOS **≥ 200 işlem** (sembol başına ≥ 30).
+7. **Risk.** 10.000 USDT'lik bacakta maksimum DD ≤ **%8** (intrabar).
+8. **Dayanıklılık.** En az **5/10 sembolde PF ≥ 1.5** veya seçilmemiş
+   semboller üzerinde pozitif; parametre komşuluğunda (±%20) çöküş yok.
+9. **Maliyet stresi.** 2× maliyet ve 2× kayma altında hâlâ net pozitif.
+10. **Placebo.** Rastgeleleştirilmiş sinyal, gerçek sinyalden anlamlı
+    biçimde kötü olmalı.
+11. **Çoklu test.** Deneme sayısı kaydedilir; deflated Sharpe veya eşdeğeri
+    bir düzeltme olmadan pozitif sonuç kabul edilmez.
+12. **Rejim ve kapasite.** Rejim bölmesinde örneklem yeterliyse her rejimde
+    ayrı OOS; 5× notional'da edge'in en az yarısı korunmalı.
+13. **Gerekçe.** Testten **önce** yazılmış ekonomik neden: bu edge kimin
+    zararını kim kazanıyor, ne zaman ölür?
 
 Bu koşullardan biri eksikse sonuç `NO_EDGE` sayılır ve strateji canlıya
-geçmez. Tek bir iyi ay geri kalanı kurtarmaz.
+geçmez. Tek bir iyi ay geri kalanı kurtarmaz. Tier S'i geçen aday yoksa
+doğru karar `NO_TRADE`'dir; barajı düşürmek yasaktır.
 
 ## 6. Emeklilik (kill) kriterleri
 
 Bir strateji şu durumlarda emekli edilir:
 
 - 9 walk-forward penceresinin ortalaması maliyet sonrası ≤ 0, veya
-- ardışık iki çeyrekte PF < 1.0, veya
-- intrabar DD > %10 (10k bacak), veya
+- Tier S barajının herhangi bir maddesi iki çeyrek üst üste sağlanmıyorsa, veya
+- intrabar DD > %8 (10k bacak), veya
+- 2× maliyet altında net negatifse, veya
 - canlı/paper kayması (slippage) varsayımı 2 bps'i 3 kat aşıyorsa.
 
 Emekli edilen strateji "iyileştirilir" diye aynı veri üzerinde yeniden
@@ -98,14 +110,15 @@ Hiçbir aşama limitleri gevşetmez; yalnızca riski kademeli açar.
 
 ## 8. Hedef hakkında dürüst not
 
-Eski hedef "kaldıraçsız aylık %3–5" **geçersizdir**. Düzeltilmiş backtest ve
-üç alternatif hipotez bu hedefi desteklemiyor. Doğru hedef şudur:
+Eski "kaldıraçsız aylık %3–5" hedefi, hatalı backtest'e dayandığı için **geri
+çekildi**. Tier S bu seviyeyi bir **kabul tabanı** olarak yeniden tanımlar:
 
-> Maliyet sonrası pozitif beklenti, %10 DD tavanı içinde, en az 100 OOS
-> işlemle kanıtlanmış.
+> Yıllık ≥ %40 (aylık ~%3), DD ≤ %8, OOS ≥ 200 işlem, 8/9 pozitif pencere,
+> 2× maliyette net pozitif.
 
-Aylık yüzde hedefi ancak bu kanıt geldikten sonra, ölçülen beklenti üzerinden
-konuşulur.
+Bu bir vaat değildir. Dokuz hipotez test edildi ve hiçbiri bu tabanı
+geçmedi; doğru sonuç `NO_TRADE`. Aylık yüzde ancak Tier S kanıtı geldikten
+sonra, ölçülen beklenti üzerinden konuşulur.
 
 ## 9. Yönetişim
 

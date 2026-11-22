@@ -36,6 +36,7 @@ açabildiği bir trading workspace'i.
 cfos doctor                     # ortam + güvenlik
 cfos status --json              # equity, DD, heat, kill
 cfos route --text "kırılım"     # niyet + zincir + kapılar
+cfos allocate --json            # rejim -> ölçülmüş strateji; edge yoksa NO_TRADE
 cfos market BTC/USDT:USDT --json
 cfos regime BTC/USDT:USDT --tf 4h --json
 cfos candles BTC/USDT:USDT --tf 1h --limit 120 --json
@@ -52,8 +53,8 @@ cfos review --limit 100 --json
 ```
 
 MCP araçları: `cfos_status, cfos_doctor, cfos_market, cfos_regime,
-cfos_route, cfos_size, cfos_plan, cfos_execute, cfos_positions, cfos_close,
-cfos_tick, cfos_kill, cfos_unkill, cfos_journal, cfos_review`.
+cfos_allocate, cfos_route, cfos_size, cfos_plan, cfos_execute, cfos_positions,
+cfos_close, cfos_tick, cfos_kill, cfos_unkill, cfos_journal, cfos_review`.
 
 OpenCode notu: Code Mode açıkken bu araçlar `tools.cfos.cfos_status`,
 `tools.cfos.cfos_execute` … biçiminde çağrılır. Claude Code ve Codex'te düz

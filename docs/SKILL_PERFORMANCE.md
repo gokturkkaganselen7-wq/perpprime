@@ -23,10 +23,10 @@ but because a PnL number would be invented.
 
 | Skill | Strategy proxy | 12m trades | 12m avg return | OOS avg / window | Positive windows | Verdict |
 |---|---|---:|---:|---:|---:|---|
-| `cfos-trend` | Trend continuation | 353 | **-5.38%** | **-0.53%** | 3/4/3 | NO EDGE |
-| `cfos-funding-carry` | Funding carry | 625 | **-8.46%** | **-1.04%** | 2/4/2 | NO EDGE |
+| `cfos-trend` | Trend continuation | 353 | **-5.38%** | **-0.36%** | 3/4/3 | NO EDGE |
+| `cfos-funding-carry` | Funding carry | 625 | **-8.46%** | **-0.99%** | 2/5/2 | NO EDGE |
 | `cfos-breakout` | Opening-range breakout | 1002 | **-22.94%** | **-2.44%** | 3/3/2 | NO EDGE |
-| `cfos-mean-reversion` | Range mean reversion | 187 | **-3.90%** | **-0.98%** | 1/3/3 | NO EDGE |
+| `cfos-mean-reversion` | Range mean reversion | 187 | **-3.90%** | **-1.00%** | 1/3/3 | NO EDGE |
 
 `cfos-breakout` is proxied by the opening-range breakout, `cfos-mean-reversion`
 by the range fade, `cfos-funding-carry` by the 8h funding harvest. The full
@@ -35,6 +35,23 @@ the trend rules are in [BACKTEST.md](BACKTEST.md).
 
 **No strategy passes.** All four have negative out-of-sample averages and
 fewer than 6 of 9 positive windows per symbol.
+
+Two skills were tested with a second, structurally different proxy:
+`cfos-funding-carry` as a delta-neutral spot-perp basis trade (positive
+gross, negative net of retail fees) and `cfos-breakout` as a multi-day
+squeeze breakout (negative). Variants do not change the verdicts; see
+[RESEARCH_2026-11-22.md](RESEARCH_2026-11-22.md).
+
+### 2.1 Additional measured variants
+
+| Skill | Variant | OOS avg | Positive windows | Verdict |
+|---|---|---:|---:|---|
+| `cfos-breakout` | Multi-day squeeze | -0.85% | 1/9 | NO EDGE |
+| `cfos-funding-carry` | Basis (net) | -1.74% | 0/9 | NO EDGE |
+| `cfos-trend` | Cross-sectional 10 | -1.55% | 1/9 | NO EDGE |
+| `cfos-funding-carry` | Funding dispersion | +0.18% | 3/9 | NO EDGE |
+| `cfos-trend` | Daily time-series | -0.98% | 5/14 | NO EDGE |
+
 
 ## 3. Full matrix
 
@@ -87,7 +104,7 @@ Both are deliberately left unmeasured until the data exists.
 ## 6. Implication
 
 - The **infrastructure** claim is supported: routing, risk gates, sizing,
-  execution, journal and audit are exercised by 135 tests and three
+  execution, journal and audit are exercised by 155 tests and three
   operational checks.
 - The **strategy** claim is not: four mechanical hypotheses, four
   negative out-of-sample results.

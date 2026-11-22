@@ -193,9 +193,9 @@ out-of-sample, stepping 30 days (9 windows per symbol).
 
 | Symbol | OOS trades | OOS avg / window | Positive windows | Fixed-parameter avg | Delta |
 |---|---:|---:|---:|---:|---:|
-| BTC | 86 | -0.24% | 3/9 | -0.48% | +0.24 |
-| ETH | 89 | -0.27% | 4/9 | -0.62% | +0.35 |
-| SOL | 84 | -1.07% | 3/9 | -1.09% | +0.02 |
+| BTC | 82 | -0.32% | 3/9 | -0.35% | +0.03 |
+| ETH | 89 | -0.06% | 4/9 | -0.60% | +0.54 |
+| SOL | 79 | -0.69% | 3/9 | -1.10% | +0.41 |
 
 Both the optimised and the fixed parameter sets lose money out of sample.
 The v1.0.0 claim that "optimisation hurts" was really "the bug was

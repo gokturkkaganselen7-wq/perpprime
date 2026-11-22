@@ -97,6 +97,7 @@ Ardından `cfos_status` ile equity ve kill switch kontrol edilir.
 cfos doctor                     # ortam ve güvenlik kontrolleri
 cfos status --json              # equity, drawdown, heat, kill switch
 cfos route --text "kırılım"     # niyet -> skill zinciri + kapılar
+cfos allocate --json            # rejim -> ölçülmüş strateji; edge yoksa NO_TRADE
 cfos market BTC/USDT:USDT --json
 cfos regime BTC/USDT:USDT --tf 4h --json
 cfos candles BTC/USDT:USDT --tf 1h --limit 120 --json
@@ -239,10 +240,16 @@ mean-reversion. Üçü de maliyet sonrası negatif; hiçbiri
 - **[docs/EDGES_2026-11-22.md](docs/EDGES_2026-11-22.md)** — kurallar, 12 aylık
   sonuçlar, 2023/2024 dayanıklılık pencereleri, walk-forward ve 2x maliyet
   stresi.
+- **[docs/RESEARCH_2026-11-22.md](docs/RESEARCH_2026-11-22.md)** — sıkışma,
+  basis, yatay kesit momentum, funding dispersiyonu ve günlük trend; Tier S
+  barajı ve pencere-sonu hata düzeltmesi.
 - **[docs/SKILL_PERFORMANCE.md](docs/SKILL_PERFORMANCE.md)** — 24 skill'in
   hangisi ölçülebilir, hangisi altyapı/analiz; ölçülen dördü de `NO EDGE`.
 - **[docs/STRATEGY_CHARTER.md](docs/STRATEGY_CHARTER.md)** — piyasa, ufuk,
   risk bütçesi, kanıt standardı ve emeklilik kriterleri.
+
+`cfos allocate` bu tabloyu okur: mevcut rejimde ölçülmüş edge yoksa
+`NO_TRADE` döner; kayıt defteri `config/strategy_registry.json`.
 
 ## Depo düzeni
 
@@ -252,7 +259,7 @@ cfos/
 ├── opencode.json, .mcp.json      # MCP bağlantıları
 ├── bin/cfos                      # başlatıcı (PYTHONPATH ayarlı)
 ├── config/                       # risk.toml, universe.toml
-├── scripts/                      # backtest_trend.py, backtest_edges.py
+├── scripts/                      # backtest_trend.py, backtest_edges.py, backtest_basis.py, backtest_xsec.py, backtest_funding_dispersion.py, backtest_daily_trend.py
 ├── skills/                       # 24 SKILL.md + registry audit
 ├── src/cfos/                     # Python çekirdeği
 ├── tests/                        # pytest
@@ -265,16 +272,20 @@ cfos/
 ## v1 sınırları (dürüst liste)
 
 - **Canlı işlem için onay yok.** 2026-11-22 denetiminde backtest'teki
-  look-ahead hatası düzeltildi; düzeltilmiş sonuçlar trend kurallarında
-  pozitif beklenti göstermiyor. Dört mekanik hipotez (trend, funding carry,
-  opening-range breakout, range fade) test edildi; hiçbiri
-  `docs/STRATEGY_CHARTER.md` kanıt barajını geçmedi. Strateji yeniden
-  tasarlanmadan gerçek sermaye kullanılmamalı.
+  look-ahead ve pencere-sonu hataları düzeltildi; düzeltilmiş sonuçlar
+  hiçbir stratejide Tier S barajını geçmiyor. Dokuz mekanik hipotez test
+  edildi: trend, tek bacak funding carry, opening-range breakout, range
+  fade, sıkışma, basis carry, yatay kesit momentum, funding dispersiyonu
+  ve günlük trend. Yalnızca basis'in brüt edge'i gerçek (9/9 OOS) ama
+  retail ücretlerle net negatif; diğerleri OOS'ta negatif. Strateji
+  yeniden tasarlanmadan gerçek sermaye kullanılmamalı.
 - Yerleşik `cfos backtest` komutu **yok**; sayı üretmek için
   `scripts/backtest_trend.py` kullanılır. `cfos-backtest`/`cfos-walk-forward`
   skill'leri bu script olmadan sonuç uydurmaz.
 - Execution tek sembol ve tek yön (one-way mode) varsayar; hedge mode yok.
-- Funding/OI **tarihsel serisi** yok; yalnızca anlık snapshot.
+- Funding/OI **tarihsel serisi** `cfos` runtime'ında yok; yalnızca anlık
+  snapshot. Backtest script'leri funding geçmişini ayrıca çeker; OI geçmişi
+  hiç yok.
 - Grid otomasyonu yok; grid planı seviye seviye manuel/agent emri gerektirir.
 - Spot bacağı ayrı yönetilir; carry stratejisi delta-neutral otomatik değildir.
 - Orderbook derinliği sınırlı (5 seviye) okunur; market impact modeli yok.
