@@ -54,6 +54,56 @@ UNIVERSE = [
     "XRP/USDT:USDT", "DOGE/USDT:USDT", "AVAX/USDT:USDT", "LINK/USDT:USDT",
     "ARB/USDT:USDT", "OP/USDT:USDT",
 ]
+UNIVERSE_MID = [
+    "ADA/USDT:USDT", "DOT/USDT:USDT", "LTC/USDT:USDT", "BCH/USDT:USDT",
+    "ATOM/USDT:USDT", "NEAR/USDT:USDT", "INJ/USDT:USDT", "SUI/USDT:USDT",
+    "APT/USDT:USDT", "FIL/USDT:USDT", "TIA/USDT:USDT", "SEI/USDT:USDT",
+]
+UNIVERSE_ALL = UNIVERSE + UNIVERSE_MID
+
+# Simple square-root impact model, deliberately conservative. The order
+# notional is compared with the trailing 24h dollar volume; a 5k order on a
+# 5M ADV pays ~4.7 bps on top of the 2 bps base.
+BASE_SLIP_BPS = 2.0
+MID_SLIP_BPS = 5.0
+IMPACT_COEF = 150.0
+MAX_SLIP_BPS = 150.0
+
+
+def dynamic_slip_bps(adv: float | None, notional: float,
+                     base_bps: float = BASE_SLIP_BPS) -> float:
+    if not adv or adv <= 0 or notional <= 0:
+        return base_bps
+    impact = IMPACT_COEF * (notional / adv) ** 0.5
+    return min(MAX_SLIP_BPS, base_bps + impact)
+
+
+def _adv(rows: list[list[float]], bars: int = 24) -> list[float]:
+    """Trailing dollar volume, aligned with the rows."""
+    out: list[float] = []
+    window: list[float] = []
+    for r in rows:
+        window.append(float(r[5]) * float(r[4]))
+        if len(window) > bars:
+            window.pop(0)
+        out.append(sum(window))
+    return out
+
+
+def _adv_at(data: dict[str, Any], sym: str, ts: int) -> float | None:
+    if "adv" not in data[sym]:
+        return None
+    rows = data[sym]["rows"]
+    lo, hi = 0, len(rows) - 1
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        if rows[mid][0] < ts:
+            lo = mid + 1
+        elif rows[mid][0] > ts:
+            hi = mid - 1
+        else:
+            return data[sym]["adv"][mid]
+    return None
 
 
 @dataclass(frozen=True)
@@ -107,6 +157,7 @@ def load_universe(start_ms: int, end_ms: int,
             "rows": rows,
             "by_ts": {int(r[0]): r for r in rows},
             "atr": atr_series(rows, 14),
+            "adv": _adv(rows),
             "funding": _funding_by_bar(rows, funding),
         }
     common = sorted(set.intersection(
@@ -154,8 +205,9 @@ def simulate_xsec(uni: dict[str, Any], params: XsecParams,
                   extra_fee_bps: float = 0.0) -> None:
         nonlocal equity
         p = positions.pop(sym)
-        fill = px * (1 - SLIP_BPS / 10_000) if p["side"] == "long" \
-            else px * (1 + SLIP_BPS / 10_000)
+        slip = p.get("slip_bps", SLIP_BPS)
+        fill = px * (1 - slip / 10_000) if p["side"] == "long" \
+            else px * (1 + slip / 10_000)
         gross = (fill - p["entry"]) * p["qty"] if p["side"] == "long" \
             else (p["entry"] - fill) * p["qty"]
         fee = fill * p["qty"] * (FEE_BPS + extra_fee_bps) / 10_000
@@ -181,13 +233,17 @@ def simulate_xsec(uni: dict[str, Any], params: XsecParams,
         atr = atr_at(sym, i - 1)
         if atr is None or atr <= 0:
             return
-        entry = r[1] * (1 + SLIP_BPS / 10_000) if side == "long" \
-            else r[1] * (1 - SLIP_BPS / 10_000)
         risk_dist = params.stop_atr * atr
         if risk_dist <= 0:
             return
         risk_amount = equity * params.risk_pct / 100.0
         qty = risk_amount / risk_dist
+        est = min(qty * r[1], equity * params.max_leg_leverage)
+        base = BASE_SLIP_BPS if sym in UNIVERSE else MID_SLIP_BPS
+        slip = dynamic_slip_bps(_adv_at(data, sym, index[i - 1]), est,
+                                base_bps=base)
+        entry = r[1] * (1 + slip / 10_000) if side == "long" \
+            else r[1] * (1 - slip / 10_000)
         notional = qty * entry
         if notional > equity * params.max_leg_leverage:
             qty = equity * params.max_leg_leverage / entry
@@ -200,7 +256,7 @@ def simulate_xsec(uni: dict[str, Any], params: XsecParams,
             "symbol": sym, "side": side, "entry": entry, "qty": qty,
             "stop": entry - risk_dist if side == "long" else entry + risk_dist,
             "entry_ts": int(index[i]), "risk_amount": risk_amount,
-            "entry_fee": fee, "funding": 0.0,
+            "entry_fee": fee, "funding": 0.0, "slip_bps": slip,
             "liq": _liq(side, entry, notional / max(equity, 1e-9)),
         }
 
@@ -401,6 +457,8 @@ def main() -> int:
     ap.add_argument("--test-days", type=int, default=30)
     ap.add_argument("--step-days", type=int, default=30)
     ap.add_argument("--k", type=int, default=1)
+    ap.add_argument("--universe", choices=["majors", "mid", "all"],
+                    default="all")
     ap.add_argument("--lookback-bars", type=int, default=None)
     ap.add_argument("--rebalance-bars", type=int, default=None)
     ap.add_argument("--json-out", default="")
@@ -418,7 +476,9 @@ def main() -> int:
             bt.SLIP_BPS = args.slip_bps
 
     start_ms, end_ms = parse_day(args.start), parse_day(args.end)
-    uni = load_universe(start_ms - args.warmup_days * DAY, end_ms, UNIVERSE)
+    symbols = {"majors": UNIVERSE, "mid": UNIVERSE_MID,
+               "all": UNIVERSE_ALL}[args.universe]
+    uni = load_universe(start_ms - args.warmup_days * DAY, end_ms, symbols)
     params = XsecParams(
         k=args.k,
         lookback_bars=args.lookback_bars or 168,
@@ -429,7 +489,7 @@ def main() -> int:
         "generated": datetime.now(timezone.utc).isoformat(),
         "strategy": "xsec",
         "mode": args.mode,
-        "universe": UNIVERSE,
+        "universe": symbols,
         "range": {"start": args.start, "end": args.end},
         "config": {"fee_bps": FEE_BPS, "slip_bps": SLIP_BPS,
                    "k": args.k, "default_params": params.label()},

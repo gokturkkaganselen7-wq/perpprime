@@ -104,7 +104,7 @@ Both are deliberately left unmeasured until the data exists.
 ## 6. Implication
 
 - The **infrastructure** claim is supported: routing, risk gates, sizing,
-  execution, journal and audit are exercised by 155 tests and three
+  execution, journal and audit are exercised by 158 tests and three
   operational checks.
 - The **strategy** claim is not: four mechanical hypotheses, four
   negative out-of-sample results.

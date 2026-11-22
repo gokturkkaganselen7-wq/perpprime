@@ -47,7 +47,16 @@ from backtest_trend import (  # noqa: E402
     iso,
     parse_day,
 )
-from backtest_xsec import UNIVERSE  # noqa: E402
+from backtest_xsec import (  # noqa: E402
+    BASE_SLIP_BPS,
+    MID_SLIP_BPS,
+    UNIVERSE,
+    UNIVERSE_ALL,
+    UNIVERSE_MID,
+    _adv,
+    _adv_at,
+    dynamic_slip_bps,
+)
 
 HOUR = 3_600_000
 
@@ -82,6 +91,7 @@ def load_daily(symbols: list[str], start_ms: int, end_ms: int) -> dict[str, Any]
             "rows": rows,
             "by_ts": {int(r[0]): r for r in rows},
             "atr": atr_series(rows, 14),
+            "adv": _adv(rows, bars=1),
             "funding": _funding_by_day(rows, funding),
         }
     common = sorted(set.intersection(*(set(d["by_ts"]) for d in data.values())))
@@ -137,8 +147,9 @@ def simulate_daily(uni: dict[str, Any], params: DailyParams,
     def close_pos(sym: str, px: float, ts: int, reason: str) -> None:
         nonlocal equity
         p = positions.pop(sym)
-        fill = px * (1 - SLIP_BPS / 10_000) if p["side"] == "long" \
-            else px * (1 + SLIP_BPS / 10_000)
+        slip = p.get("slip_bps", SLIP_BPS)
+        fill = px * (1 - slip / 10_000) if p["side"] == "long" \
+            else px * (1 + slip / 10_000)
         gross = (fill - p["entry"]) * p["qty"] if p["side"] == "long" \
             else (p["entry"] - fill) * p["qty"]
         fee = fill * p["qty"] * FEE_BPS / 10_000
@@ -161,8 +172,12 @@ def simulate_daily(uni: dict[str, Any], params: DailyParams,
     def open_pos(sym: str, side: str, i: int, notional: float) -> None:
         nonlocal equity
         r = bar(sym, i)
-        entry = r[1] * (1 + SLIP_BPS / 10_000) if side == "long" \
-            else r[1] * (1 - SLIP_BPS / 10_000)
+        slip = dynamic_slip_bps(
+            _adv_at(data, sym, index[i - 1]), notional,
+            base_bps=BASE_SLIP_BPS if sym in UNIVERSE else MID_SLIP_BPS,
+        )
+        entry = r[1] * (1 + slip / 10_000) if side == "long" \
+            else r[1] * (1 - slip / 10_000)
         if entry <= 0 or notional < 10:
             return
         fi = pos_of[sym].get(index[i])
@@ -177,6 +192,7 @@ def simulate_daily(uni: dict[str, Any], params: DailyParams,
             "symbol": sym, "side": side, "entry": entry,
             "qty": notional / entry, "notional": notional, "stop": stop,
             "entry_ts": int(index[i]), "entry_fee": fee, "funding": 0.0,
+            "slip_bps": slip,
         }
 
     end_i = n - 1
@@ -353,6 +369,8 @@ def main() -> int:
     ap.add_argument("--fast", type=int, default=50)
     ap.add_argument("--slow", type=int, default=200)
     ap.add_argument("--rebalance-days", type=int, default=7)
+    ap.add_argument("--universe", choices=["majors", "mid", "all"],
+                    default="all")
     ap.add_argument("--json-out", default="")
     ap.add_argument("--fee-bps", type=float, default=None)
     ap.add_argument("--slip-bps", type=float, default=None)
@@ -368,7 +386,9 @@ def main() -> int:
             bt.SLIP_BPS = args.slip_bps
 
     start_ms, end_ms = parse_day(args.start), parse_day(args.end)
-    uni = load_daily(UNIVERSE, start_ms - args.warmup_days * DAY, end_ms)
+    symbols = {"majors": UNIVERSE, "mid": UNIVERSE_MID,
+               "all": UNIVERSE_ALL}[args.universe]
+    uni = load_daily(symbols, start_ms - args.warmup_days * DAY, end_ms)
     params = DailyParams(fast=args.fast, slow=args.slow,
                          rebalance_days=args.rebalance_days)
 
@@ -376,7 +396,7 @@ def main() -> int:
         "generated": datetime.now(timezone.utc).isoformat(),
         "strategy": "daily_trend",
         "mode": args.mode,
-        "universe": UNIVERSE,
+        "universe": symbols,
         "range": {"start": args.start, "end": args.end},
         "config": {"fee_bps": FEE_BPS, "slip_bps": SLIP_BPS,
                    "default_params": params.label()},

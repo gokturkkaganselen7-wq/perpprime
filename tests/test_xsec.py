@@ -98,3 +98,34 @@ def test_funding_reaches_equity_for_a_long_leg():
     long_trade = [t for t in paid["trades_detail"]
                   if t["symbol"] == "AAA/USDT:USDT"][0]
     assert long_trade["funding"] < 0
+
+
+def test_dynamic_slippage_scales_with_order_to_adv():
+    from backtest_xsec import BASE_SLIP_BPS, MAX_SLIP_BPS, dynamic_slip_bps
+
+    # Unknown ADV: fall back to the base cost, never invent a discount.
+    assert dynamic_slip_bps(None, 5_000) == BASE_SLIP_BPS
+    assert dynamic_slip_bps(0, 5_000) == BASE_SLIP_BPS
+    # 5k into 1B ADV is essentially free; 5k into 100k is expensive.
+    tiny = dynamic_slip_bps(1_000_000_000, 5_000)
+    large = dynamic_slip_bps(100_000, 5_000)
+    assert BASE_SLIP_BPS <= tiny < 3.0
+    assert large > 30.0
+    assert large <= MAX_SLIP_BPS
+
+
+def test_adv_is_trailing_dollar_volume():
+    from backtest_xsec import _adv
+
+    rows = [[i * 3_600_000, 100.0, 100.0, 100.0, 100.0, 10.0] for i in range(30)]
+    adv = _adv(rows, bars=24)
+    assert adv[0] == 1_000.0
+    assert adv[-1] == 24_000.0
+
+
+def test_all_universe_is_majors_plus_midcaps():
+    from backtest_xsec import UNIVERSE, UNIVERSE_ALL, UNIVERSE_MID
+
+    assert len(UNIVERSE_ALL) == len(UNIVERSE) + len(UNIVERSE_MID)
+    assert not set(UNIVERSE) & set(UNIVERSE_MID)
+    assert len(UNIVERSE_ALL) == 22
