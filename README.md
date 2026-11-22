@@ -1,5 +1,9 @@
 # PerpPrime
 
+> **RAFA KALDIRILDI — 2026-11-22.** Hiçbir strateji Tier A/S barajını
+> geçmedi; sistem paper-only. Final durum ve devam planı:
+> **[STATUS_2026-11-22.md](STATUS_2026-11-22.md)**.
+
 ### Agent-native perpetual futures desk — powered by CFOS
 
 Kripto vadeli işlemler (perpetual futures) için **taşınabilir, ajan-native bir
