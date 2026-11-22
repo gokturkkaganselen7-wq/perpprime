@@ -337,7 +337,11 @@ def simulate_edge(prep: dict[str, Any], params: EdgeParams,
             pos = None
             pending_exit = None
 
-    for i in range(1, len(rows)):
+    end_i = len(rows) - 1
+    while end_i > 0 and rows[end_i][0] > end_ms:
+        end_i -= 1
+
+    for i in range(1, end_i + 1):
         if ruined:
             break
         ts, o, h, l, c, _v = rows[i]
@@ -472,7 +476,7 @@ def simulate_edge(prep: dict[str, Any], params: EdgeParams,
         last_entry_day = ctx["day_id"][i]
 
     if pos is not None:
-        close_position(rows[-1][4], rows[-1][0], pos["qty"], "window_end")
+        close_position(rows[end_i][4], rows[end_i][0], pos["qty"], "window_end")
 
     return _metrics(trades, equity0, equity, max_dd=max_dd, curve=curve)
 

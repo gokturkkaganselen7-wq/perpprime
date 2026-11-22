@@ -164,7 +164,11 @@ def simulate_basis(data: dict[str, Any], params: BasisParams,
         pos = None
         pending = None
 
-    for i in range(1, len(rows)):
+    end_i = len(rows) - 1
+    while end_i > 0 and rows[end_i][0] > end_ms:
+        end_i -= 1
+
+    for i in range(1, end_i + 1):
         ts, po, ph, pl, pc, _v = rows[i]
         _ts, so, sh, sl, sc, _sv = spot_rows[i]
 
@@ -230,7 +234,8 @@ def simulate_basis(data: dict[str, Any], params: BasisParams,
         pending = None
 
     if pos is not None:
-        close_at(int(rows[-1][0]), spot_rows[-1][1], rows[-1][1], "window_end")
+        close_at(int(rows[end_i][0]), spot_rows[end_i][1], rows[end_i][1],
+                 "window_end")
 
     return _metrics(trades, equity0, equity, max_dd=max_dd, curve=curve)
 

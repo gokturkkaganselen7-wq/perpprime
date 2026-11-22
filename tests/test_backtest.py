@@ -254,3 +254,22 @@ def test_portfolio_metrics_ignores_unshared_timestamps():
     assert port["bars"] == 1
     assert port["start_equity"] == 20_000.0
     assert port["end_equity"] == 19_000.0
+
+
+def test_position_is_closed_at_the_window_edge_not_the_file_end():
+    """A walk-forward test window must not hold a position into later data."""
+    candles = [(100.0, 100.5, 99.5, 100.0)] * 19
+    candles.append((100.0, 100.5, 99.5, 99.0))    # bar 19: pullback
+    candles.append((100.0, 102.0, 99.8, 101.0))   # bar 20: signal
+    candles.append((100.0, 100.5, 99.9, 100.0))   # bar 21: entry bar
+    candles += [(100.0, 100.5, 99.9, 100.0)] * 4  # bars 22..25
+    candles += [(200.0, 200.0, 200.0, 200.0)] * 14  # after the window
+
+    prep = _prep_with(candles)
+    params = _long_params()
+    res = simulate(prep, params, 0, 25 * HOUR)
+
+    trade = res["trades_detail"][0]
+    assert trade["exit_reason"] == "window_end"
+    assert trade["exit_ts"] == "1970-01-02 01:00"   # bar 25 (25h), not the file end
+    assert trade["pnl"] < 10.0                       # no 200.0 windfall
